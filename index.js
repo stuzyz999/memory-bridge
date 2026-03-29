@@ -54,6 +54,7 @@ let lastSendIntentAt = 0;
 let isProcessing = false;
 let lastInjectedContent = '';
 let lastErrorMessage = '';
+let registeredFunctionTools = [];
 
 // ─── 工具函数 ─────────────────────────────────────────────────────────────────
 
@@ -600,6 +601,80 @@ async function mcpCallTool(toolName, args) {
     return content.filter(c => c.type === 'text').map(c => c.text).join('\n');
 }
 
+function unregisterAllFunctionTools() {
+    const context = SillyTavern.getContext();
+    if (typeof context.unregisterFunctionTool !== 'function') return;
+    for (const toolName of registeredFunctionTools) {
+        try {
+            context.unregisterFunctionTool(toolName);
+        } catch (error) {
+            logError('注销函数工具失败:', toolName, error);
+        }
+    }
+    registeredFunctionTools = [];
+}
+
+function toFunctionToolName(serverName, toolName) {
+    return `mb__${serverName}__${toolName}`.replace(/[^a-zA-Z0-9_]/g, '_');
+}
+
+function getOriginalToolName(functionToolName) {
+    const parts = String(functionToolName).split('__');
+    return parts.slice(2).join('__') || functionToolName;
+}
+
+async function registerMcpToolsToSillyTavern() {
+    const context = SillyTavern.getContext();
+    unregisterAllFunctionTools();
+
+    if (typeof context.registerFunctionTool !== 'function') {
+        log('当前 ST 环境不支持 registerFunctionTool');
+        return;
+    }
+
+    if (typeof context.isToolCallingSupported === 'function' && !context.isToolCallingSupported()) {
+        log('当前预设或模型未启用工具调用');
+        return;
+    }
+
+    if (!shouldExposeTools()) {
+        log('当前模式未启用工具暴露');
+        return;
+    }
+
+    if (!await ensureConnected()) {
+        throw new Error(lastErrorMessage || '无法连接到 MCP 服务');
+    }
+
+    const config = resolveConnectionConfig();
+    const serverName = getSelectedServerName(config);
+    const response = await mcpRpc('tools/list', {});
+    const data = await parseMcpResponse(response);
+    if (data?.error) {
+        throw new Error(`MCP 列工具失败: ${data.error.message}`);
+    }
+
+    const tools = Array.isArray(data?.result?.tools) ? data.result.tools : [];
+    for (const tool of tools) {
+        if (!tool?.name || !tool?.description) continue;
+        const functionToolName = toFunctionToolName(serverName, tool.name);
+        context.registerFunctionTool({
+            name: functionToolName,
+            displayName: tool.title || tool.name,
+            description: tool.description,
+            parameters: tool.inputSchema || { type: 'object', properties: {} },
+            action: async (args) => {
+                const originalToolName = getOriginalToolName(functionToolName);
+                return await mcpCallTool(originalToolName, args ?? {});
+            },
+            shouldRegister: () => shouldExposeTools(),
+        });
+        registeredFunctionTools.push(functionToolName);
+    }
+
+    log('已注册函数工具数量:', registeredFunctionTools.length);
+}
+
 // ─── 连接管理 ─────────────────────────────────────────────────────────────────
 
 async function connect() {
@@ -896,6 +971,7 @@ function bindSettingsEvents() {
     document.getElementById('mb-work-mode')?.addEventListener('change', () => {
         saveSettingsFromUI();
         updateWorkModeUI();
+        unregisterAllFunctionTools();
         resetMcpClient();
         setConnectionState('disconnected');
     });
@@ -903,6 +979,7 @@ function bindSettingsEvents() {
     document.getElementById('mb-connection-mode')?.addEventListener('change', () => {
         saveSettingsFromUI();
         updateConnectionModeUI();
+        unregisterAllFunctionTools();
         resetMcpClient();
         setConnectionState('disconnected');
     });
@@ -911,6 +988,13 @@ function bindSettingsEvents() {
         saveSettingsFromUI();
         resetMcpClient();
         const ok = await connect();
+        if (ok) {
+            try {
+                await registerMcpToolsToSillyTavern();
+            } catch (error) {
+                logError('注册函数工具失败:', error);
+            }
+        }
         toastr[ok ? 'success' : 'error'](
             ok ? 'MCP 服务连接成功' : (lastErrorMessage || '连接失败，请检查当前连接配置'),
             'Memory Bridge',
@@ -950,6 +1034,12 @@ jQuery(async () => {
     // 加载设置到 UI 并绑定事件
     loadSettingsToUI();
     bindSettingsEvents();
+
+    try {
+        await registerMcpToolsToSillyTavern();
+    } catch (error) {
+        logError('初始化注册函数工具失败:', error);
+    }
 
     // 安装发送意图捕获钩子
     installSendIntentHooks();
