@@ -5,6 +5,36 @@
   padding: 4px 0;
 }
 
+.mb-row-top {
+  align-items: flex-start;
+}
+
+.mb-row textarea {
+  flex: 1;
+  min-height: 140px;
+  resize: vertical;
+  background: var(--SmartThemeBlurTintColor, #1a1a2e);
+  border: 1px solid var(--SmartThemeBorderColor, #444);
+  border-radius: 4px;
+  color: var(--SmartThemeBodyColor, #ccc);
+  padding: 6px 8px;
+  font-size: 0.85em;
+  font-family: var(--monoFontFamily, Consolas, monospace);
+  line-height: 1.4;
+}
+
+.mb-row textarea:focus,
+.mb-row select:focus,
+.mb-row input[type="text"]:focus,
+.mb-row input[type="number"]:focus,
+.mb-row input[type="password"]:focus {
+  outline: none;
+  border-color: var(--SmartThemeQuoteColor, #7a7aff);
+}
+
+.mb-hidden {
+  display: none;
+}
 .mb-section {
   display: flex;
   flex-direction: column;

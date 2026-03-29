@@ -11,13 +11,45 @@
         <div class="mb-section-title">MCP 服务连接</div>
 
         <div class="mb-row">
-          <label for="mb-server-url">服务地址</label>
-          <input type="text" id="mb-server-url" placeholder="http://localhost:8000/mcp" />
+          <label for="mb-connection-mode">连接模式</label>
+          <select id="mb-connection-mode">
+            <option value="http">HTTP 地址</option>
+            <option value="json">MCP JSON</option>
+          </select>
         </div>
 
-        <div class="mb-row">
-          <label for="mb-token">Bearer Token</label>
-          <input type="password" id="mb-token" placeholder="留空则不鉴权" />
+        <div id="mb-http-config">
+          <div class="mb-row">
+            <label for="mb-server-url">服务地址</label>
+            <input type="text" id="mb-server-url" placeholder="http://localhost:8000/mcp" />
+          </div>
+
+          <div class="mb-row">
+            <label for="mb-token">Bearer Token</label>
+            <input type="password" id="mb-token" placeholder="留空则不鉴权" />
+          </div>
+        </div>
+
+        <div id="mb-json-config" class="mb-hidden">
+          <div class="mb-row">
+            <label for="mb-selected-server-name">Server 名称</label>
+            <input type="text" id="mb-selected-server-name" placeholder="留空默认取第一个 mcpServers 项" />
+          </div>
+          <div class="mb-row mb-row-top">
+            <label for="mb-mcp-config-json">MCP JSON</label>
+            <textarea id="mb-mcp-config-json" placeholder='{
+  "mcpServers": {
+    "mcp-router": {
+      "command": "npx",
+      "args": ["-y", "@mcp_router/cli@latest", "connect"],
+      "env": {
+        "MCPR_TOKEN": ""
+      }
+    }
+  }
+}'></textarea>
+          </div>
+          <div class="mb-hint">支持标准 `mcpServers` 结构；当前可直接连接 `url` 配置，`command` 配置会先做解析与提示。</div>
         </div>
 
         <div class="mb-status-row">

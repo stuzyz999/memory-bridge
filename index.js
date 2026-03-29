@@ -1,6 +1,6 @@
 /**
  * Memory Bridge — SillyTavern Extension
- * 独立记忆召回层：通过 MCP Streamable HTTP 协议连接外置记忆库，
+ * 独立记忆召回层：通过 MCP 协议连接外置记忆库，
  * 在用户发送前自动召回相关记忆并注入上下文，不占用 RPAI token。
  */
 
@@ -9,13 +9,25 @@
 const EXT_NAME = 'memory-bridge';
 const LOG_PREFIX = '[MemBridge]';
 const SEND_INTENT_TTL_MS = 5000;
+const DEFAULT_MCP_CONFIG_JSON = JSON.stringify({
+    mcpServers: {
+        'mcp-router': {
+            command: 'npx',
+            args: ['-y', '@mcp_router/cli@latest', 'connect'],
+            env: { MCPR_TOKEN: '' },
+        },
+    },
+}, null, 2);
 
 // ─── 默认设置 ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_SETTINGS = {
     enabled: false,
+    connectionMode: 'http',
     serverUrl: 'http://localhost:8000/mcp',
     token: '',
+    mcpConfigJson: DEFAULT_MCP_CONFIG_JSON,
+    selectedServerName: '',
     recallLimit: 5,
     domain: '',
     injectTag: '[记忆参考]',
@@ -26,7 +38,7 @@ const DEFAULT_SETTINGS = {
 
 // ─── 运行时状态 ───────────────────────────────────────────────────────────────
 
-let mcpSessionId = null;
+let mcpClient = null;
 let connectionState = 'disconnected';
 let lastSendIntentAt = 0;
 let isProcessing = false;
@@ -47,7 +59,6 @@ function getSettings() {
     if (!extensionSettings[EXT_NAME]) {
         extensionSettings[EXT_NAME] = Object.assign({}, DEFAULT_SETTINGS);
     }
-    // 补全新增字段
     for (const key of Object.keys(DEFAULT_SETTINGS)) {
         if (!Object.hasOwn(extensionSettings[EXT_NAME], key)) {
             extensionSettings[EXT_NAME][key] = DEFAULT_SETTINGS[key];
@@ -56,30 +67,103 @@ function getSettings() {
     return extensionSettings[EXT_NAME];
 }
 
-// ─── MCP Streamable HTTP 客户端 ───────────────────────────────────────────────
+function resetMcpClient() {
+    mcpClient = null;
+}
 
-async function mcpRpc(method, params) {
-    const settings = getSettings();
-    const headers = {
-        'accept': 'application/json, text/event-stream',
-        'content-type': 'application/json',
-    };
-    if (mcpSessionId) headers['mcp-session-id'] = mcpSessionId;
-    if (settings.token) headers['Authorization'] = `Bearer ${settings.token}`;
-
+function createRpcBody(method, params) {
     const isNotification = method.startsWith('notifications/');
     const body = { jsonrpc: '2.0', method, params };
     if (!isNotification) body.id = crypto.randomUUID();
+    return body;
+}
 
-    log(`RPC → ${method}`);
-    const response = await fetch(settings.serverUrl, {
-        method: 'POST',
+function resolveHttpConnectionConfig(settings) {
+    const url = settings.serverUrl?.trim();
+    if (!url) throw new Error('请填写 MCP 服务地址');
+    const headers = {};
+    if (settings.token) headers.Authorization = `Bearer ${settings.token}`;
+    return {
+        source: 'http',
+        transport: 'streamable-http',
+        url,
         headers,
-        body: JSON.stringify(body),
-    });
+        label: url,
+    };
+}
 
-    if (!response.ok) throw new Error(`MCP HTTP ${response.status}: ${response.statusText}`);
-    return response;
+function normalizeJsonHttpServer(serverName, serverConfig) {
+    const url = serverConfig.url?.trim();
+    if (!url) throw new Error(`MCP server ${serverName} 缺少 url`);
+    const headers = serverConfig.headers && typeof serverConfig.headers === 'object'
+        ? Object.fromEntries(Object.entries(serverConfig.headers).filter(([, value]) => value != null))
+        : {};
+    return {
+        source: 'json',
+        transport: 'streamable-http',
+        url,
+        headers,
+        label: serverName,
+    };
+}
+
+function normalizeJsonCommandServer(serverName, serverConfig) {
+    const command = serverConfig.command?.trim();
+    if (!command) throw new Error(`MCP server ${serverName} 缺少 command`);
+    const args = Array.isArray(serverConfig.args) ? serverConfig.args.map(arg => String(arg)) : [];
+    const env = serverConfig.env && typeof serverConfig.env === 'object'
+        ? Object.fromEntries(Object.entries(serverConfig.env).filter(([, value]) => value != null).map(([key, value]) => [key, String(value)]))
+        : {};
+    return {
+        source: 'json',
+        transport: 'command',
+        command,
+        args,
+        env,
+        label: serverName,
+    };
+}
+
+function resolveJsonConnectionConfig(settings) {
+    const raw = settings.mcpConfigJson?.trim();
+    if (!raw) throw new Error('请填写 MCP JSON 配置');
+
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (error) {
+        throw new Error(`MCP JSON 解析失败: ${error.message}`);
+    }
+
+    const servers = parsed?.mcpServers;
+    if (!servers || typeof servers !== 'object') {
+        throw new Error('MCP JSON 必须包含 mcpServers 对象');
+    }
+
+    const entries = Object.entries(servers).filter(([, value]) => value && typeof value === 'object');
+    if (!entries.length) {
+        throw new Error('mcpServers 中没有可用的 server 配置');
+    }
+
+    const selectedServerName = settings.selectedServerName?.trim();
+    const match = selectedServerName
+        ? entries.find(([name]) => name === selectedServerName)
+        : entries[0];
+    if (!match) {
+        throw new Error(`未找到名为 ${selectedServerName} 的 MCP server`);
+    }
+
+    const [serverName, serverConfig] = match;
+    if (serverConfig.url) return normalizeJsonHttpServer(serverName, serverConfig);
+    if (serverConfig.command) return normalizeJsonCommandServer(serverName, serverConfig);
+    throw new Error(`MCP server ${serverName} 既没有 url，也没有 command`);
+}
+
+function resolveConnectionConfig() {
+    const settings = getSettings();
+    return settings.connectionMode === 'json'
+        ? resolveJsonConnectionConfig(settings)
+        : resolveHttpConnectionConfig(settings);
 }
 
 async function parseMcpResponse(response) {
@@ -110,7 +194,9 @@ async function parseMcpResponse(response) {
                     const parsed = JSON.parse(data);
                     log('RPC ← SSE', parsed);
                     return parsed;
-                } catch { /* continue */ }
+                } catch {
+                    continue;
+                }
             }
         }
         throw new Error('SSE 流结束但未收到有效数据');
@@ -119,18 +205,81 @@ async function parseMcpResponse(response) {
     throw new Error(`未知响应类型: ${contentType}`);
 }
 
+function createStreamableHttpClient(config) {
+    let sessionId = null;
+
+    return {
+        config,
+        async send(method, params) {
+            const headers = {
+                accept: 'application/json, text/event-stream',
+                'content-type': 'application/json',
+                ...config.headers,
+            };
+            if (sessionId) headers['mcp-session-id'] = sessionId;
+
+            log(`RPC → ${method}`, config.label);
+            const response = await fetch(config.url, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(createRpcBody(method, params)),
+            });
+            if (!response.ok) throw new Error(`MCP HTTP ${response.status}: ${response.statusText}`);
+            const nextSessionId = response.headers.get('mcp-session-id');
+            if (nextSessionId) sessionId = nextSessionId;
+            return response;
+        },
+        getSessionId() {
+            return sessionId;
+        },
+        reset() {
+            sessionId = null;
+        },
+    };
+}
+
+function createCommandClient(config) {
+    return {
+        config,
+        async send() {
+            const argsPreview = [config.command, ...config.args].join(' ');
+            throw new Error(`当前运行环境不支持直接启动 command MCP: ${argsPreview}`);
+        },
+        getSessionId() {
+            return null;
+        },
+        reset() {},
+    };
+}
+
+function createMcpClient(config) {
+    if (config.transport === 'streamable-http') return createStreamableHttpClient(config);
+    if (config.transport === 'command') return createCommandClient(config);
+    throw new Error(`不支持的 MCP transport: ${config.transport}`);
+}
+
+function getMcpClient() {
+    if (!mcpClient) {
+        const config = resolveConnectionConfig();
+        mcpClient = createMcpClient(config);
+    }
+    return mcpClient;
+}
+
+async function mcpRpc(method, params) {
+    return await getMcpClient().send(method, params);
+}
+
 async function mcpInitialize() {
     const initResponse = await mcpRpc('initialize', {
         protocolVersion: '2025-03-26',
         capabilities: {},
         clientInfo: { name: 'memory-bridge', version: '0.1.0' },
     });
-    const newSessionId = initResponse.headers.get('mcp-session-id');
-    if (newSessionId) {
-        mcpSessionId = newSessionId;
-        log('会话已建立, sessionId:', mcpSessionId);
-    }
-    await parseMcpResponse(initResponse);
+    const data = await parseMcpResponse(initResponse);
+    const sessionId = getMcpClient().getSessionId();
+    if (sessionId) log('会话已建立, sessionId:', sessionId);
+    if (data?.error) throw new Error(`MCP 初始化失败: ${data.error.message}`);
     await mcpRpc('notifications/initialized', {});
     return true;
 }
@@ -148,13 +297,16 @@ async function mcpCallTool(toolName, args) {
 async function connect() {
     if (connectionState === 'connecting') return false;
     setConnectionState('connecting');
-    mcpSessionId = null;
+    resetMcpClient();
     try {
+        const config = resolveConnectionConfig();
+        log('连接配置:', config);
         await mcpInitialize();
         setConnectionState('connected');
         log('连接成功');
         return true;
     } catch (err) {
+        resetMcpClient();
         setConnectionState('disconnected');
         logError('连接失败:', err);
         return false;
@@ -162,7 +314,7 @@ async function connect() {
 }
 
 async function ensureConnected() {
-    if (connectionState === 'connected' && mcpSessionId) return true;
+    if (connectionState === 'connected' && mcpClient) return true;
     return await connect();
 }
 
@@ -188,7 +340,7 @@ async function recallMemory(query) {
         return result;
     } catch (err) {
         logError('记忆召回失败:', err);
-        mcpSessionId = null;
+        resetMcpClient();
         setConnectionState('disconnected');
         return '';
     }
@@ -201,7 +353,7 @@ async function readMemory(uri) {
         return await mcpCallTool('read_memory', { uri });
     } catch (err) {
         logError('读取记忆失败:', err);
-        mcpSessionId = null;
+        resetMcpClient();
         setConnectionState('disconnected');
         return '';
     }
@@ -351,6 +503,14 @@ function updateLastInjectPreview(content) {
 
 // ─── 设置面板 ─────────────────────────────────────────────────────────────────
 
+function updateConnectionModeUI() {
+    const mode = document.getElementById('mb-connection-mode')?.value ?? 'http';
+    const httpSection = document.getElementById('mb-http-config');
+    const jsonSection = document.getElementById('mb-json-config');
+    httpSection?.classList.toggle('mb-hidden', mode !== 'http');
+    jsonSection?.classList.toggle('mb-hidden', mode !== 'json');
+}
+
 function loadSettingsToUI() {
     const s = getSettings();
     const set = (id, val) => {
@@ -359,14 +519,18 @@ function loadSettingsToUI() {
         el.type === 'checkbox' ? (el.checked = !!val) : (el.value = val ?? '');
     };
     set('mb-enabled', s.enabled);
+    set('mb-connection-mode', s.connectionMode);
     set('mb-server-url', s.serverUrl);
     set('mb-token', s.token);
+    set('mb-mcp-config-json', s.mcpConfigJson);
+    set('mb-selected-server-name', s.selectedServerName);
     set('mb-recall-limit', s.recallLimit);
     set('mb-domain', s.domain);
     set('mb-inject-tag', s.injectTag);
     set('mb-boot-enabled', s.bootEnabled);
     set('mb-boot-uri', s.bootUri);
     set('mb-debug', s.debug);
+    updateConnectionModeUI();
     updateStatusUI(connectionState);
     updateLastInjectPreview(lastInjectedContent);
 }
@@ -375,28 +539,37 @@ function saveSettingsFromUI() {
     const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
     const s = extensionSettings[EXT_NAME];
     const get = (id) => document.getElementById(id);
-    s.enabled      = get('mb-enabled')?.checked ?? false;
-    s.serverUrl    = get('mb-server-url')?.value?.trim() ?? '';
-    s.token        = get('mb-token')?.value ?? '';
-    s.recallLimit  = parseInt(get('mb-recall-limit')?.value) || 5;
-    s.domain       = get('mb-domain')?.value?.trim() ?? '';
-    s.injectTag    = get('mb-inject-tag')?.value ?? '[记忆参考]';
-    s.bootEnabled  = get('mb-boot-enabled')?.checked ?? false;
-    s.bootUri      = get('mb-boot-uri')?.value?.trim() ?? 'system://boot';
-    s.debug        = get('mb-debug')?.checked ?? false;
+    s.enabled            = get('mb-enabled')?.checked ?? false;
+    s.connectionMode     = get('mb-connection-mode')?.value ?? 'http';
+    s.serverUrl          = get('mb-server-url')?.value?.trim() ?? '';
+    s.token              = get('mb-token')?.value ?? '';
+    s.mcpConfigJson      = get('mb-mcp-config-json')?.value ?? DEFAULT_MCP_CONFIG_JSON;
+    s.selectedServerName = get('mb-selected-server-name')?.value?.trim() ?? '';
+    s.recallLimit        = parseInt(get('mb-recall-limit')?.value) || 5;
+    s.domain             = get('mb-domain')?.value?.trim() ?? '';
+    s.injectTag          = get('mb-inject-tag')?.value ?? '[记忆参考]';
+    s.bootEnabled        = get('mb-boot-enabled')?.checked ?? false;
+    s.bootUri            = get('mb-boot-uri')?.value?.trim() ?? 'system://boot';
+    s.debug              = get('mb-debug')?.checked ?? false;
     saveSettingsDebounced();
 }
 
 function bindSettingsEvents() {
-    document.querySelectorAll('#memory-bridge-settings input, #memory-bridge-settings select')
+    document.querySelectorAll('#memory-bridge-settings input, #memory-bridge-settings select, #memory-bridge-settings textarea')
         .forEach(el => el.addEventListener('change', saveSettingsFromUI));
+
+    document.getElementById('mb-connection-mode')?.addEventListener('change', () => {
+        updateConnectionModeUI();
+        resetMcpClient();
+        setConnectionState('disconnected');
+    });
 
     document.getElementById('mb-btn-connect')?.addEventListener('click', async () => {
         saveSettingsFromUI();
-        mcpSessionId = null;
+        resetMcpClient();
         const ok = await connect();
         toastr[ok ? 'success' : 'error'](
-            ok ? 'MCP 服务连接成功' : '连接失败，请检查地址和 Token',
+            ok ? 'MCP 服务连接成功' : '连接失败，请检查当前连接配置',
             'Memory Bridge',
         );
     });
@@ -414,7 +587,7 @@ function bindSettingsEvents() {
     });
 
     document.getElementById('mb-btn-clear-session')?.addEventListener('click', () => {
-        mcpSessionId = null;
+        resetMcpClient();
         setConnectionState('disconnected');
         toastr.info('会话已清除', 'Memory Bridge');
     });
