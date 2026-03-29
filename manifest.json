@@ -1,0 +1,12 @@
+{
+  "display_name": "Memory Bridge",
+  "version": "0.1.0",
+  "description": "独立记忆召回层：通过 MCP 协议连接外置记忆库，在用户发送前自动召回相关记忆并注入上下文，不占用 RPAI token。",
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "memory-bridge",
+  "homePage": "",
+  "tags": ["memory", "mcp", "context"]
+}
