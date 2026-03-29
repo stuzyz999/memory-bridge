@@ -9,6 +9,8 @@
 const EXT_NAME = 'memory-bridge';
 const LOG_PREFIX = '[MemBridge]';
 const SEND_INTENT_TTL_MS = 5000;
+const MCP_PLUGIN_ID = 'mcp';
+const MCP_PLUGIN_BASE = `/api/plugins/${MCP_PLUGIN_ID}`;
 const DEFAULT_MCP_CONFIG_JSON = JSON.stringify({
     mcpServers: {
         'mcp-router': {
@@ -43,6 +45,7 @@ let connectionState = 'disconnected';
 let lastSendIntentAt = 0;
 let isProcessing = false;
 let lastInjectedContent = '';
+let lastErrorMessage = '';
 
 // ─── 工具函数 ─────────────────────────────────────────────────────────────────
 
@@ -54,22 +57,58 @@ function logError(...args) {
     console.error(LOG_PREFIX, ...args);
 }
 
-function getSettings() {
-    const { extensionSettings } = SillyTavern.getContext();
-    if (!extensionSettings[EXT_NAME]) {
-        extensionSettings[EXT_NAME] = Object.assign({}, DEFAULT_SETTINGS);
-    }
-    for (const key of Object.keys(DEFAULT_SETTINGS)) {
-        if (!Object.hasOwn(extensionSettings[EXT_NAME], key)) {
-            extensionSettings[EXT_NAME][key] = DEFAULT_SETTINGS[key];
-        }
-    }
-    return extensionSettings[EXT_NAME];
+function getErrorMessage(error) {
+    if (!error) return '未知错误';
+    if (typeof error === 'string') return error;
+    if (error instanceof Error) return error.message;
+    return String(error);
 }
 
-function resetMcpClient() {
-    mcpClient = null;
+function setLastErrorMessage(message) {
+    lastErrorMessage = message || '';
 }
+
+function getRequestHeaders(options = {}) {
+    const context = SillyTavern.getContext();
+    if (typeof context.getRequestHeaders === 'function') {
+        return context.getRequestHeaders(options);
+    }
+    return {
+        'Content-Type': 'application/json',
+    };
+}
+
+function getSelectedServerName(config, settings = getSettings()) {
+    if (config.source === 'json') return config.label.replace(/\s+\(via mcp-router\)$/, '');
+    return settings.selectedServerName?.trim() || 'memory-bridge-default';
+}
+
+async function pluginFetch(path, body, method = 'POST') {
+    const response = await fetch(`${MCP_PLUGIN_BASE}${path}`, {
+        method,
+        headers: {
+            ...getRequestHeaders(),
+            'Content-Type': 'application/json',
+        },
+        body: body == null ? undefined : JSON.stringify(body),
+    });
+
+    let data = null;
+    const contentType = response.headers.get('content-type') ?? '';
+    if (contentType.includes('application/json')) {
+        data = await response.json();
+    } else {
+        const text = await response.text();
+        data = text ? { raw: text } : null;
+    }
+
+    if (!response.ok) {
+        const errorMessage = data?.error || data?.message || `HTTP ${response.status}`;
+        throw new Error(errorMessage);
+    }
+    return data;
+}
+
 
 function createRpcBody(method, params) {
     const isNotification = method.startsWith('notifications/');
@@ -256,23 +295,103 @@ function createStreamableHttpClient(config) {
     };
 }
 
-function createCommandClient(config) {
+function createPluginBackedClient(config) {
+    let started = false;
+    let serverName = getSelectedServerName(config);
+
     return {
         config,
-        async send() {
-            const argsPreview = [config.command, ...config.args].join(' ');
-            throw new Error(`当前运行环境不支持直接启动 command MCP: ${argsPreview}`);
+        async send(method, params) {
+            serverName = getSelectedServerName(config);
+
+            if (!started) {
+                const pluginConfig = config.transport === 'command'
+                    ? {
+                        type: 'stdio',
+                        command: config.command,
+                        args: config.args,
+                        env: config.env,
+                    }
+                    : {
+                        type: 'streamableHttp',
+                        url: config.url,
+                        headers: config.headers,
+                        env: {},
+                    };
+
+                try {
+                    await pluginFetch('/servers', { name: serverName, config: pluginConfig });
+                } catch (error) {
+                    const message = getErrorMessage(error);
+                    if (!message.includes('already exists')) throw error;
+                }
+
+                try {
+                    await pluginFetch(`/servers/${encodeURIComponent(serverName)}/start`, {});
+                } catch (error) {
+                    const message = getErrorMessage(error);
+                    if (!message.includes('already running')) throw error;
+                }
+
+                started = true;
+            }
+
+            if (method === 'initialize') {
+                return {
+                    ok: true,
+                    headers: new Headers({ 'content-type': 'application/json' }),
+                    json: async () => ({
+                        jsonrpc: '2.0',
+                        result: {
+                            protocolVersion: '2025-03-26',
+                            capabilities: {},
+                            serverInfo: { name: serverName },
+                        },
+                    }),
+                };
+            }
+
+            if (method === 'notifications/initialized') {
+                return {
+                    ok: true,
+                    headers: new Headers({ 'content-type': 'application/json' }),
+                    json: async () => ({ jsonrpc: '2.0', result: {} }),
+                };
+            }
+
+            if (method === 'tools/call') {
+                const result = await pluginFetch(`/servers/${encodeURIComponent(serverName)}/call-tool`, {
+                    toolName: params.name,
+                    arguments: params.arguments ?? {},
+                });
+                const text = JSON.stringify(result?.result?.data ?? result?.result ?? result ?? {}, null, 2);
+                return {
+                    ok: true,
+                    headers: new Headers({ 'content-type': 'application/json' }),
+                    json: async () => ({
+                        jsonrpc: '2.0',
+                        result: {
+                            content: [{ type: 'text', text }],
+                        },
+                    }),
+                };
+            }
+
+            throw new Error(`本地 MCP 插件暂不支持方法: ${method}`);
         },
         getSessionId() {
-            return null;
+            return serverName;
         },
-        reset() {},
+        reset() {
+            started = false;
+        },
     };
 }
 
 function createMcpClient(config) {
-    if (config.transport === 'streamable-http') return createStreamableHttpClient(config);
-    if (config.transport === 'command') return createCommandClient(config);
+    if (config.transport === 'streamable-http' || config.transport === 'command') {
+        return createPluginBackedClient(config);
+    }
     throw new Error(`不支持的 MCP transport: ${config.transport}`);
 }
 
@@ -315,6 +434,7 @@ async function mcpCallTool(toolName, args) {
 async function connect() {
     if (connectionState === 'connecting') return false;
     setConnectionState('connecting');
+    setLastErrorMessage('');
     resetMcpClient();
     try {
         const config = resolveConnectionConfig();
@@ -324,6 +444,8 @@ async function connect() {
         log('连接成功');
         return true;
     } catch (err) {
+        const message = getErrorMessage(err);
+        setLastErrorMessage(message);
         resetMcpClient();
         setConnectionState('disconnected');
         logError('连接失败:', err);
@@ -502,9 +624,14 @@ async function loadBootMemory() {
 function updateStatusUI(state) {
     const dot = document.getElementById('mb-status-dot');
     const text = document.getElementById('mb-status-text');
+    const errorText = document.getElementById('mb-error-text');
     if (!dot || !text) return;
     dot.className = state;
     text.textContent = { connected: '已连接', connecting: '连接中...', disconnected: '未连接' }[state] ?? state;
+    if (errorText) {
+        errorText.textContent = lastErrorMessage || '';
+        errorText.classList.toggle('mb-hidden', !lastErrorMessage);
+    }
 }
 
 function updateLastInjectPreview(content) {
@@ -587,7 +714,7 @@ function bindSettingsEvents() {
         resetMcpClient();
         const ok = await connect();
         toastr[ok ? 'success' : 'error'](
-            ok ? 'MCP 服务连接成功' : '连接失败，请检查当前连接配置',
+            ok ? 'MCP 服务连接成功' : (lastErrorMessage || '连接失败，请检查当前连接配置'),
             'Memory Bridge',
         );
     });

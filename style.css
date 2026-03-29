@@ -32,8 +32,12 @@
   border-color: var(--SmartThemeQuoteColor, #7a7aff);
 }
 
-.mb-hidden {
-  display: none;
+.mb-error-text {
+  font-size: 0.78em;
+  color: #ff8a80;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: -2px;
 }
 .mb-section {
   display: flex;
