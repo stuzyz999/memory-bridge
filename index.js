@@ -42,6 +42,8 @@ const DEFAULT_SETTINGS = {
     },
     toolExposure: {
         enabled: true,
+        selectedTools: {},
+        stealth: true,
     },
     debug: false,
 };
@@ -126,6 +128,12 @@ function migrateLegacySettings(settings) {
 
     if (!Object.hasOwn(settings.toolExposure, 'enabled')) {
         settings.toolExposure.enabled = settings.workMode === 'tool-exposed';
+    }
+    if (!Object.hasOwn(settings.toolExposure, 'selectedTools') || typeof settings.toolExposure.selectedTools !== 'object') {
+        settings.toolExposure.selectedTools = {};
+    }
+    if (!Object.hasOwn(settings.toolExposure, 'stealth')) {
+        settings.toolExposure.stealth = true;
     }
 
     if (!Object.hasOwn(settings, 'debug')) {
@@ -217,6 +225,37 @@ function getBridgeSettings(settings = getSettings()) {
 
 function getToolExposureSettings(settings = getSettings()) {
     return settings.toolExposure ?? DEFAULT_SETTINGS.toolExposure;
+}
+
+function isToolSelected(toolName, settings = getSettings()) {
+    const selected = getToolExposureSettings(settings).selectedTools;
+    if (!selected || typeof selected !== 'object') return true;
+    return selected[toolName] === true;
+}
+
+function setAvailableToolsToUI(tools) {
+    const container = document.getElementById('mb-tool-list');
+    if (!container) return;
+
+    if (!Array.isArray(tools) || !tools.length) {
+        container.innerHTML = '<div class="mb-hint">暂无工具。先连接 MCP 后点击刷新工具列表。</div>';
+        return;
+    }
+
+    const settings = getSettings();
+    const selected = getToolExposureSettings(settings).selectedTools || {};
+    container.innerHTML = tools.map((tool) => {
+        const toolName = String(tool.name || '');
+        const checked = selected[toolName] === true ? 'checked' : '';
+        const escapedName = toolName.replace(/"/g, '&quot;');
+        const description = String(tool.description || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return `
+            <label class="mb-tool-item">
+              <input type="checkbox" class="mb-tool-checkbox" data-tool-name="${escapedName}" ${checked} />
+              <span><b>${toolName}</b><br><small>${description || '无描述'}</small></span>
+            </label>
+        `;
+    }).join('');
 }
 
 function getSelectedServerName(config, settings = getSettings()) {
@@ -654,7 +693,11 @@ async function registerMcpToolsToSillyTavern() {
         throw new Error(`MCP 列工具失败: ${data.error.message}`);
     }
 
-    const tools = Array.isArray(data?.result?.tools) ? data.result.tools : [];
+    const allTools = Array.isArray(data?.result?.tools) ? data.result.tools : [];
+    setAvailableToolsToUI(allTools);
+
+    const settings = getSettings();
+    const tools = allTools.filter((tool) => tool?.name && isToolSelected(tool.name, settings));
     for (const tool of tools) {
         if (!tool?.name || !tool?.description) continue;
         const functionToolName = toFunctionToolName(serverName, tool.name);
@@ -667,7 +710,9 @@ async function registerMcpToolsToSillyTavern() {
                 const originalToolName = getOriginalToolName(functionToolName);
                 return await mcpCallTool(originalToolName, args ?? {});
             },
-            shouldRegister: () => shouldExposeTools(),
+            formatMessage: () => '',
+            shouldRegister: () => shouldExposeTools() && isToolSelected(tool.name),
+            stealth: getToolExposureSettings(settings).stealth !== false,
         });
         registeredFunctionTools.push(functionToolName);
     }
@@ -925,6 +970,7 @@ function loadSettingsToUI() {
     set('mb-work-mode', s.workMode);
     set('mb-enabled', bridge.enabled);
     set('mb-tool-exposure-enabled', toolExposure.enabled);
+    set('mb-tool-stealth', toolExposure.stealth !== false);
     set('mb-connection-mode', connection.mode);
     set('mb-server-url', connection.serverUrl);
     set('mb-token', connection.token);
@@ -959,6 +1005,10 @@ function saveSettingsFromUI() {
     s.bridge.bootEnabled = get('mb-boot-enabled')?.checked ?? false;
     s.bridge.bootUri = get('mb-boot-uri')?.value?.trim() ?? 'system://boot';
     s.toolExposure.enabled = get('mb-tool-exposure-enabled')?.checked ?? false;
+    s.toolExposure.stealth = get('mb-tool-stealth')?.checked ?? true;
+    s.toolExposure.selectedTools = Object.fromEntries(
+        Array.from(document.querySelectorAll('.mb-tool-checkbox')).map((el) => [el.dataset.toolName, el.checked]),
+    );
     s.debug = get('mb-debug')?.checked ?? false;
     extensionSettings[EXT_NAME] = s;
     saveSettingsDebounced();
@@ -999,6 +1049,31 @@ function bindSettingsEvents() {
             ok ? 'MCP 服务连接成功' : (lastErrorMessage || '连接失败，请检查当前连接配置'),
             'Memory Bridge',
         );
+    });
+
+    document.getElementById('mb-btn-refresh-tools')?.addEventListener('click', async () => {
+        saveSettingsFromUI();
+        try {
+            await registerMcpToolsToSillyTavern();
+            toastr.success(`已刷新工具列表，当前注册 ${registeredFunctionTools.length} 个工具`, 'Memory Bridge');
+        } catch (error) {
+            logError('刷新工具列表失败:', error);
+            toastr.error(getErrorMessage(error), 'Memory Bridge');
+        }
+    });
+
+    document.getElementById('mb-btn-select-all-tools')?.addEventListener('click', () => {
+        document.querySelectorAll('.mb-tool-checkbox').forEach((el) => {
+            el.checked = true;
+        });
+        saveSettingsFromUI();
+    });
+
+    document.getElementById('mb-btn-clear-all-tools')?.addEventListener('click', () => {
+        document.querySelectorAll('.mb-tool-checkbox').forEach((el) => {
+            el.checked = false;
+        });
+        saveSettingsFromUI();
     });
 
     document.getElementById('mb-btn-test-recall')?.addEventListener('click', async () => {

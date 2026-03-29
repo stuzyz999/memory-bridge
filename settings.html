@@ -122,7 +122,21 @@
           <label for="mb-tool-exposure-enabled">向 RP AI 暴露 MCP 工具</label>
         </div>
 
-        <div class="mb-hint">仅在 `tool-exposed` 模式下生效。启用后会声明 `tools` capabilities，并允许 `tools/list` / `tools/call`。</div>
+        <div class="mb-toggle-row">
+          <input type="checkbox" id="mb-tool-stealth" />
+          <label for="mb-tool-stealth">尽量隐藏工具调用楼层</label>
+        </div>
+
+        <div class="mb-btn-row">
+          <button class="mb-btn" id="mb-btn-refresh-tools">刷新工具列表</button>
+          <button class="mb-btn" id="mb-btn-select-all-tools">全选</button>
+          <button class="mb-btn" id="mb-btn-clear-all-tools">清空</button>
+        </div>
+
+        <div class="mb-hint">仅在 `tool-exposed` 模式下生效。启用后会声明 `tools` capabilities，并允许 `tools/list` / `tools/call`。工具列表按名称勾选后才会注册给 RP AI。</div>
+        <div id="mb-tool-list" class="mb-tool-list">
+          <div class="mb-hint">暂无工具。先连接 MCP 后点击刷新工具列表。</div>
+        </div>
       </div>
 
       <!-- 调试 -->
