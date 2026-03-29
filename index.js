@@ -24,17 +24,25 @@ const DEFAULT_MCP_CONFIG_JSON = JSON.stringify({
 // ─── 默认设置 ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_SETTINGS = {
-    enabled: false,
-    connectionMode: 'http',
-    serverUrl: 'http://localhost:8000/mcp',
-    token: '',
-    mcpConfigJson: DEFAULT_MCP_CONFIG_JSON,
-    selectedServerName: '',
-    recallLimit: 5,
-    domain: '',
-    injectTag: '[记忆参考]',
-    bootEnabled: false,
-    bootUri: 'system://boot',
+    workMode: 'bridge',
+    connection: {
+        mode: 'http',
+        serverUrl: 'http://localhost:8000/mcp',
+        token: '',
+        mcpConfigJson: DEFAULT_MCP_CONFIG_JSON,
+        selectedServerName: '',
+    },
+    bridge: {
+        enabled: false,
+        recallLimit: 5,
+        domain: '',
+        injectTag: '[记忆参考]',
+        bootEnabled: false,
+        bootUri: 'system://boot',
+    },
+    toolExposure: {
+        enabled: true,
+    },
     debug: false,
 };
 
@@ -57,16 +65,111 @@ function logError(...args) {
     console.error(LOG_PREFIX, ...args);
 }
 
+function getDefaultSettings() {
+    return JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+}
+
+function migrateLegacySettings(settings) {
+    if (!settings || typeof settings !== 'object') {
+        return getDefaultSettings();
+    }
+
+    if (!settings.connection || typeof settings.connection !== 'object') {
+        settings.connection = {};
+    }
+    if (!settings.bridge || typeof settings.bridge !== 'object') {
+        settings.bridge = {};
+    }
+    if (!settings.toolExposure || typeof settings.toolExposure !== 'object') {
+        settings.toolExposure = {};
+    }
+
+    if (!settings.workMode) {
+        settings.workMode = 'bridge';
+    }
+
+    if (!Object.hasOwn(settings.connection, 'mode')) {
+        settings.connection.mode = settings.connectionMode ?? DEFAULT_SETTINGS.connection.mode;
+    }
+    if (!Object.hasOwn(settings.connection, 'serverUrl')) {
+        settings.connection.serverUrl = settings.serverUrl ?? DEFAULT_SETTINGS.connection.serverUrl;
+    }
+    if (!Object.hasOwn(settings.connection, 'token')) {
+        settings.connection.token = settings.token ?? DEFAULT_SETTINGS.connection.token;
+    }
+    if (!Object.hasOwn(settings.connection, 'mcpConfigJson')) {
+        settings.connection.mcpConfigJson = settings.mcpConfigJson ?? DEFAULT_SETTINGS.connection.mcpConfigJson;
+    }
+    if (!Object.hasOwn(settings.connection, 'selectedServerName')) {
+        settings.connection.selectedServerName = settings.selectedServerName ?? DEFAULT_SETTINGS.connection.selectedServerName;
+    }
+
+    if (!Object.hasOwn(settings.bridge, 'enabled')) {
+        settings.bridge.enabled = settings.enabled ?? DEFAULT_SETTINGS.bridge.enabled;
+    }
+    if (!Object.hasOwn(settings.bridge, 'recallLimit')) {
+        settings.bridge.recallLimit = settings.recallLimit ?? DEFAULT_SETTINGS.bridge.recallLimit;
+    }
+    if (!Object.hasOwn(settings.bridge, 'domain')) {
+        settings.bridge.domain = settings.domain ?? DEFAULT_SETTINGS.bridge.domain;
+    }
+    if (!Object.hasOwn(settings.bridge, 'injectTag')) {
+        settings.bridge.injectTag = settings.injectTag ?? DEFAULT_SETTINGS.bridge.injectTag;
+    }
+    if (!Object.hasOwn(settings.bridge, 'bootEnabled')) {
+        settings.bridge.bootEnabled = settings.bootEnabled ?? DEFAULT_SETTINGS.bridge.bootEnabled;
+    }
+    if (!Object.hasOwn(settings.bridge, 'bootUri')) {
+        settings.bridge.bootUri = settings.bootUri ?? DEFAULT_SETTINGS.bridge.bootUri;
+    }
+
+    if (!Object.hasOwn(settings.toolExposure, 'enabled')) {
+        settings.toolExposure.enabled = settings.workMode === 'tool-exposed';
+    }
+
+    if (!Object.hasOwn(settings, 'debug')) {
+        settings.debug = false;
+    }
+
+    delete settings.connectionMode;
+    delete settings.serverUrl;
+    delete settings.token;
+    delete settings.mcpConfigJson;
+    delete settings.selectedServerName;
+    delete settings.enabled;
+    delete settings.recallLimit;
+    delete settings.domain;
+    delete settings.injectTag;
+    delete settings.bootEnabled;
+    delete settings.bootUri;
+
+    return settings;
+}
+
+function applyDefaultSettings(target, defaults) {
+    for (const [key, value] of Object.entries(defaults)) {
+        if (!Object.hasOwn(target, key) || target[key] == null) {
+            target[key] = Array.isArray(value)
+                ? [...value]
+                : (value && typeof value === 'object')
+                    ? JSON.parse(JSON.stringify(value))
+                    : value;
+            continue;
+        }
+
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+            applyDefaultSettings(target[key], value);
+        }
+    }
+}
+
 function getSettings() {
     const { extensionSettings } = SillyTavern.getContext();
     if (!extensionSettings[EXT_NAME]) {
-        extensionSettings[EXT_NAME] = Object.assign({}, DEFAULT_SETTINGS);
+        extensionSettings[EXT_NAME] = getDefaultSettings();
     }
-    for (const key of Object.keys(DEFAULT_SETTINGS)) {
-        if (!Object.hasOwn(extensionSettings[EXT_NAME], key)) {
-            extensionSettings[EXT_NAME][key] = DEFAULT_SETTINGS[key];
-        }
-    }
+    extensionSettings[EXT_NAME] = migrateLegacySettings(extensionSettings[EXT_NAME]);
+    applyDefaultSettings(extensionSettings[EXT_NAME], DEFAULT_SETTINGS);
     return extensionSettings[EXT_NAME];
 }
 
@@ -95,9 +198,29 @@ function getRequestHeaders(options = {}) {
     };
 }
 
+function isBridgeMode(settings = getSettings()) {
+    return settings.workMode !== 'tool-exposed';
+}
+
+function isToolExposureEnabled(settings = getSettings()) {
+    return settings.workMode === 'tool-exposed' && settings.toolExposure?.enabled !== false;
+}
+
+function getConnectionSettings(settings = getSettings()) {
+    return settings.connection ?? DEFAULT_SETTINGS.connection;
+}
+
+function getBridgeSettings(settings = getSettings()) {
+    return settings.bridge ?? DEFAULT_SETTINGS.bridge;
+}
+
+function getToolExposureSettings(settings = getSettings()) {
+    return settings.toolExposure ?? DEFAULT_SETTINGS.toolExposure;
+}
+
 function getSelectedServerName(config, settings = getSettings()) {
     if (config.source === 'json') return config.label.replace(/\s+\(via mcp-router\)$/, '');
-    return settings.selectedServerName?.trim() || 'memory-bridge-default';
+    return getConnectionSettings(settings).selectedServerName?.trim() || 'memory-bridge-default';
 }
 
 async function pluginFetch(path, body, method = 'POST') {
@@ -135,10 +258,11 @@ function createRpcBody(method, params) {
 }
 
 function resolveHttpConnectionConfig(settings) {
-    const url = settings.serverUrl?.trim();
+    const connection = getConnectionSettings(settings);
+    const url = connection.serverUrl?.trim();
     if (!url) throw new Error('请填写 MCP 服务地址');
     const headers = {};
-    if (settings.token) headers.Authorization = `Bearer ${settings.token}`;
+    if (connection.token) headers.Authorization = `Bearer ${connection.token}`;
     return {
         source: 'http',
         transport: 'streamable-http',
@@ -198,7 +322,8 @@ function normalizeJsonCommandServer(serverName, serverConfig) {
 }
 
 function resolveJsonConnectionConfig(settings) {
-    const raw = settings.mcpConfigJson?.trim();
+    const connection = getConnectionSettings(settings);
+    const raw = connection.mcpConfigJson?.trim();
     if (!raw) throw new Error('请填写 MCP JSON 配置');
 
     let parsed;
@@ -218,7 +343,7 @@ function resolveJsonConnectionConfig(settings) {
         throw new Error('mcpServers 中没有可用的 server 配置');
     }
 
-    const selectedServerName = settings.selectedServerName?.trim();
+    const selectedServerName = connection.selectedServerName?.trim();
     const match = selectedServerName
         ? entries.find(([name]) => name === selectedServerName)
         : entries[0];
@@ -234,7 +359,7 @@ function resolveJsonConnectionConfig(settings) {
 
 function resolveConnectionConfig() {
     const settings = getSettings();
-    return settings.connectionMode === 'json'
+    return getConnectionSettings(settings).mode === 'json'
         ? resolveJsonConnectionConfig(settings)
         : resolveHttpConnectionConfig(settings);
 }
@@ -311,6 +436,10 @@ function createStreamableHttpClient(config) {
     };
 }
 
+function shouldExposeTools(settings = getSettings()) {
+    return isToolExposureEnabled(settings);
+}
+
 function createPluginBackedClient(config) {
     let started = false;
     let serverName = getSelectedServerName(config);
@@ -358,6 +487,7 @@ function createPluginBackedClient(config) {
             }
 
             if (method === 'initialize') {
+                const exposeTools = shouldExposeTools();
                 return {
                     ok: true,
                     headers: new Headers({ 'content-type': 'application/json' }),
@@ -365,9 +495,7 @@ function createPluginBackedClient(config) {
                         jsonrpc: '2.0',
                         result: {
                             protocolVersion: '2025-03-26',
-                            capabilities: {
-                                tools: {},
-                            },
+                            capabilities: exposeTools ? { tools: {} } : {},
                             serverInfo: { name: serverName },
                         },
                     }),
@@ -383,6 +511,9 @@ function createPluginBackedClient(config) {
             }
 
             if (method === 'tools/list') {
+                if (!shouldExposeTools()) {
+                    throw new Error('当前模式未启用工具暴露');
+                }
                 const tools = await pluginFetch(`/servers/${encodeURIComponent(serverName)}/list-tools`, null, 'GET');
                 return {
                     ok: true,
@@ -397,6 +528,9 @@ function createPluginBackedClient(config) {
             }
 
             if (method === 'tools/call') {
+                if (!shouldExposeTools()) {
+                    throw new Error('当前模式未启用工具暴露');
+                }
                 const result = await pluginFetch(`/servers/${encodeURIComponent(serverName)}/call-tool`, {
                     toolName: params.name,
                     arguments: params.arguments ?? {},
@@ -504,13 +638,14 @@ function setConnectionState(state) {
 
 async function recallMemory(query) {
     const settings = getSettings();
+    const bridge = getBridgeSettings(settings);
     try {
         if (!await ensureConnected()) {
             logError('无法连接到 MCP 服务，跳过记忆召回');
             return '';
         }
-        const args = { query: query.slice(0, 500), limit: settings.recallLimit };
-        if (settings.domain) args.domain = settings.domain;
+        const args = { query: query.slice(0, 500), limit: bridge.recallLimit };
+        if (bridge.domain) args.domain = bridge.domain;
         log('召回记忆, query:', args.query);
         const result = await mcpCallTool('search_memory', args);
         log('召回结果长度:', result.length);
@@ -540,7 +675,7 @@ async function readMemory(uri) {
 
 function buildInjectedMessage(userInput, memoryContent) {
     if (!memoryContent?.trim()) return userInput;
-    const tag = getSettings().injectTag?.trim();
+    const tag = getBridgeSettings().injectTag?.trim();
     const block = tag
         ? `\n\n${tag}\n${memoryContent.trim()}\n${tag}`
         : `\n\n${memoryContent.trim()}`;
@@ -578,7 +713,8 @@ function installSendIntentHooks() {
 // ─── 核心拦截逻辑 ─────────────────────────────────────────────────────────────
 
 async function onGenerationAfterCommands(type, params, dryRun) {
-    if (!getSettings().enabled) return;
+    if (!isBridgeMode()) return;
+    if (!getBridgeSettings().enabled) return;
     if (dryRun) return;
     if (isProcessing) return;
     if (type === 'quiet') return;
@@ -642,10 +778,10 @@ async function onGenerationAfterCommands(type, params, dryRun) {
 // ─── Boot Memory ──────────────────────────────────────────────────────────────
 
 async function loadBootMemory() {
-    const settings = getSettings();
-    if (!settings.bootEnabled || !settings.bootUri) return;
-    log('加载 Boot Memory:', settings.bootUri);
-    const content = await readMemory(settings.bootUri);
+    const bridge = getBridgeSettings();
+    if (!isBridgeMode() || !bridge.bootEnabled || !bridge.bootUri) return;
+    log('加载 Boot Memory:', bridge.bootUri);
+    const content = await readMemory(bridge.bootUri);
     if (!content) return;
     try {
         const { setExtensionPrompt, extension_prompt_types } = SillyTavern.getContext();
@@ -693,46 +829,63 @@ function updateConnectionModeUI() {
     jsonSection?.classList.toggle('mb-hidden', mode !== 'json');
 }
 
+function updateWorkModeUI() {
+    const workMode = document.getElementById('mb-work-mode')?.value ?? 'bridge';
+    const bridgeSections = document.querySelectorAll('[data-mb-mode="bridge"]');
+    const toolSections = document.querySelectorAll('[data-mb-mode="tool-exposed"]');
+    bridgeSections.forEach(section => section.classList.toggle('mb-hidden', workMode !== 'bridge'));
+    toolSections.forEach(section => section.classList.toggle('mb-hidden', workMode !== 'tool-exposed'));
+}
+
 function loadSettingsToUI() {
     const s = getSettings();
+    const connection = getConnectionSettings(s);
+    const bridge = getBridgeSettings(s);
+    const toolExposure = getToolExposureSettings(s);
     const set = (id, val) => {
         const el = document.getElementById(id);
         if (!el) return;
         el.type === 'checkbox' ? (el.checked = !!val) : (el.value = val ?? '');
     };
-    set('mb-enabled', s.enabled);
-    set('mb-connection-mode', s.connectionMode);
-    set('mb-server-url', s.serverUrl);
-    set('mb-token', s.token);
-    set('mb-mcp-config-json', s.mcpConfigJson);
-    set('mb-selected-server-name', s.selectedServerName);
-    set('mb-recall-limit', s.recallLimit);
-    set('mb-domain', s.domain);
-    set('mb-inject-tag', s.injectTag);
-    set('mb-boot-enabled', s.bootEnabled);
-    set('mb-boot-uri', s.bootUri);
+    set('mb-work-mode', s.workMode);
+    set('mb-enabled', bridge.enabled);
+    set('mb-tool-exposure-enabled', toolExposure.enabled);
+    set('mb-connection-mode', connection.mode);
+    set('mb-server-url', connection.serverUrl);
+    set('mb-token', connection.token);
+    set('mb-mcp-config-json', connection.mcpConfigJson);
+    set('mb-selected-server-name', connection.selectedServerName);
+    set('mb-recall-limit', bridge.recallLimit);
+    set('mb-domain', bridge.domain);
+    set('mb-inject-tag', bridge.injectTag);
+    set('mb-boot-enabled', bridge.bootEnabled);
+    set('mb-boot-uri', bridge.bootUri);
     set('mb-debug', s.debug);
     updateConnectionModeUI();
+    updateWorkModeUI();
     updateStatusUI(connectionState);
     updateLastInjectPreview(lastInjectedContent);
 }
 
 function saveSettingsFromUI() {
     const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
-    const s = extensionSettings[EXT_NAME];
+    const s = getSettings();
     const get = (id) => document.getElementById(id);
-    s.enabled            = get('mb-enabled')?.checked ?? false;
-    s.connectionMode     = get('mb-connection-mode')?.value ?? 'http';
-    s.serverUrl          = get('mb-server-url')?.value?.trim() ?? '';
-    s.token              = get('mb-token')?.value ?? '';
-    s.mcpConfigJson      = get('mb-mcp-config-json')?.value ?? DEFAULT_MCP_CONFIG_JSON;
-    s.selectedServerName = get('mb-selected-server-name')?.value?.trim() ?? '';
-    s.recallLimit        = parseInt(get('mb-recall-limit')?.value) || 5;
-    s.domain             = get('mb-domain')?.value?.trim() ?? '';
-    s.injectTag          = get('mb-inject-tag')?.value ?? '[记忆参考]';
-    s.bootEnabled        = get('mb-boot-enabled')?.checked ?? false;
-    s.bootUri            = get('mb-boot-uri')?.value?.trim() ?? 'system://boot';
-    s.debug              = get('mb-debug')?.checked ?? false;
+    s.workMode = get('mb-work-mode')?.value ?? 'bridge';
+    s.connection.mode = get('mb-connection-mode')?.value ?? 'http';
+    s.connection.serverUrl = get('mb-server-url')?.value?.trim() ?? '';
+    s.connection.token = get('mb-token')?.value ?? '';
+    s.connection.mcpConfigJson = get('mb-mcp-config-json')?.value ?? DEFAULT_MCP_CONFIG_JSON;
+    s.connection.selectedServerName = get('mb-selected-server-name')?.value?.trim() ?? '';
+    s.bridge.enabled = get('mb-enabled')?.checked ?? false;
+    s.bridge.recallLimit = parseInt(get('mb-recall-limit')?.value) || 5;
+    s.bridge.domain = get('mb-domain')?.value?.trim() ?? '';
+    s.bridge.injectTag = get('mb-inject-tag')?.value ?? '[记忆参考]';
+    s.bridge.bootEnabled = get('mb-boot-enabled')?.checked ?? false;
+    s.bridge.bootUri = get('mb-boot-uri')?.value?.trim() ?? 'system://boot';
+    s.toolExposure.enabled = get('mb-tool-exposure-enabled')?.checked ?? false;
+    s.debug = get('mb-debug')?.checked ?? false;
+    extensionSettings[EXT_NAME] = s;
     saveSettingsDebounced();
 }
 
@@ -740,7 +893,15 @@ function bindSettingsEvents() {
     document.querySelectorAll('#memory-bridge-settings input, #memory-bridge-settings select, #memory-bridge-settings textarea')
         .forEach(el => el.addEventListener('change', saveSettingsFromUI));
 
+    document.getElementById('mb-work-mode')?.addEventListener('change', () => {
+        saveSettingsFromUI();
+        updateWorkModeUI();
+        resetMcpClient();
+        setConnectionState('disconnected');
+    });
+
     document.getElementById('mb-connection-mode')?.addEventListener('change', () => {
+        saveSettingsFromUI();
         updateConnectionModeUI();
         resetMcpClient();
         setConnectionState('disconnected');

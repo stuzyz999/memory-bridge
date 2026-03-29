@@ -1,3 +1,7 @@
+.mb-hidden {
+  display: none !important;
+}
+
 #memory-bridge-settings {
   display: flex;
   flex-direction: column;

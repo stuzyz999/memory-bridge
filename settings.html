@@ -6,6 +6,20 @@
   <div class="inline-drawer-content">
     <div id="memory-bridge-settings">
 
+      <!-- 工作模式 -->
+      <div class="mb-section">
+        <div class="mb-section-title">运行模式</div>
+
+        <div class="mb-row">
+          <label for="mb-work-mode">工作模式</label>
+          <select id="mb-work-mode">
+            <option value="bridge">Bridge（默认）</option>
+            <option value="tool-exposed">Tool Exposed</option>
+          </select>
+        </div>
+        <div class="mb-hint">`bridge` 模式由扩展自动召回并注入记忆；`tool-exposed` 模式向 RP AI 暴露 MCP 工具。</div>
+      </div>
+
       <!-- 连接配置 -->
       <div class="mb-section">
         <div class="mb-section-title">MCP 服务连接</div>
@@ -61,8 +75,7 @@
       </div>
 
       <!-- 召回配置 -->
-      <div class="mb-section">
-        <div class="mb-section-title">记忆召回</div>
+      <div class="mb-section" data-mb-mode="bridge">
 
         <div class="mb-toggle-row">
           <input type="checkbox" id="mb-enabled" />
@@ -87,8 +100,7 @@
       </div>
 
       <!-- 启动记忆 -->
-      <div class="mb-section">
-        <div class="mb-section-title">启动记忆（Boot Memory）</div>
+      <div class="mb-section" data-mb-mode="bridge">
 
         <div class="mb-toggle-row">
           <input type="checkbox" id="mb-boot-enabled" />
@@ -100,6 +112,17 @@
           <input type="text" id="mb-boot-uri" placeholder="system://boot" />
         </div>
         <div class="mb-hint">加载后注入为系统提示词（不修改聊天记录）</div>
+      </div>
+
+      <div class="mb-section" data-mb-mode="tool-exposed">
+        <div class="mb-section-title">工具暴露</div>
+
+        <div class="mb-toggle-row">
+          <input type="checkbox" id="mb-tool-exposure-enabled" />
+          <label for="mb-tool-exposure-enabled">向 RP AI 暴露 MCP 工具</label>
+        </div>
+
+        <div class="mb-hint">仅在 `tool-exposed` 模式下生效。启用后会声明 `tools` capabilities，并允许 `tools/list` / `tools/call`。</div>
       </div>
 
       <!-- 调试 -->
