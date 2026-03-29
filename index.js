@@ -57,6 +57,23 @@ function logError(...args) {
     console.error(LOG_PREFIX, ...args);
 }
 
+function getSettings() {
+    const { extensionSettings } = SillyTavern.getContext();
+    if (!extensionSettings[EXT_NAME]) {
+        extensionSettings[EXT_NAME] = Object.assign({}, DEFAULT_SETTINGS);
+    }
+    for (const key of Object.keys(DEFAULT_SETTINGS)) {
+        if (!Object.hasOwn(extensionSettings[EXT_NAME], key)) {
+            extensionSettings[EXT_NAME][key] = DEFAULT_SETTINGS[key];
+        }
+    }
+    return extensionSettings[EXT_NAME];
+}
+
+function resetMcpClient() {
+    mcpClient = null;
+}
+
 function getErrorMessage(error) {
     if (!error) return '未知错误';
     if (typeof error === 'string') return error;
