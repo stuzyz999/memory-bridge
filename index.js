@@ -315,6 +315,10 @@ function createPluginBackedClient(config) {
     let started = false;
     let serverName = getSelectedServerName(config);
 
+    async function ensureToolCacheLoaded() {
+        await pluginFetch(`/servers/${encodeURIComponent(serverName)}/reload-tools`, {});
+    }
+
     return {
         config,
         async send(method, params) {
@@ -349,6 +353,7 @@ function createPluginBackedClient(config) {
                     if (!message.includes('already running')) throw error;
                 }
 
+                await ensureToolCacheLoaded();
                 started = true;
             }
 
@@ -360,7 +365,9 @@ function createPluginBackedClient(config) {
                         jsonrpc: '2.0',
                         result: {
                             protocolVersion: '2025-03-26',
-                            capabilities: {},
+                            capabilities: {
+                                tools: {},
+                            },
                             serverInfo: { name: serverName },
                         },
                     }),
@@ -372,6 +379,20 @@ function createPluginBackedClient(config) {
                     ok: true,
                     headers: new Headers({ 'content-type': 'application/json' }),
                     json: async () => ({ jsonrpc: '2.0', result: {} }),
+                };
+            }
+
+            if (method === 'tools/list') {
+                const tools = await pluginFetch(`/servers/${encodeURIComponent(serverName)}/list-tools`, null, 'GET');
+                return {
+                    ok: true,
+                    headers: new Headers({ 'content-type': 'application/json' }),
+                    json: async () => ({
+                        jsonrpc: '2.0',
+                        result: {
+                            tools: Array.isArray(tools) ? tools.filter(tool => tool?._enabled !== false) : [],
+                        },
+                    }),
                 };
             }
 
