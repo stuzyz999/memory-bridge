@@ -179,11 +179,10 @@ function normalizeJsonCommandServer(serverName, serverConfig) {
         if (!token) throw new Error(`MCP server ${serverName} 缺少 MCPR_TOKEN`);
         return {
             source: 'json',
-            transport: 'streamable-http',
-            url: 'https://mcp-router.net/mcp',
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
+            transport: 'command',
+            command,
+            args,
+            env,
             label: `${serverName} (via mcp-router)`,
         };
     }
