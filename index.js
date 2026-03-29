@@ -114,6 +114,24 @@ function normalizeJsonCommandServer(serverName, serverConfig) {
     const env = serverConfig.env && typeof serverConfig.env === 'object'
         ? Object.fromEntries(Object.entries(serverConfig.env).filter(([, value]) => value != null).map(([key, value]) => [key, String(value)]))
         : {};
+
+    const isMcpRouterConnect = command === 'npx'
+        && args.some(arg => arg.includes('@mcp_router/cli'))
+        && args.includes('connect');
+    if (isMcpRouterConnect) {
+        const token = env.MCPR_TOKEN?.trim();
+        if (!token) throw new Error(`MCP server ${serverName} 缺少 MCPR_TOKEN`);
+        return {
+            source: 'json',
+            transport: 'streamable-http',
+            url: 'https://mcp-router.net/mcp',
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+            label: `${serverName} (via mcp-router)`,
+        };
+    }
+
     return {
         source: 'json',
         transport: 'command',
