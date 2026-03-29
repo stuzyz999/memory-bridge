@@ -39,6 +39,7 @@ const DEFAULT_SETTINGS = {
         injectTag: '[记忆参考]',
         bootEnabled: false,
         bootUri: 'system://boot',
+        testSnippet: '',
     },
     toolExposure: {
         enabled: true,
@@ -56,6 +57,7 @@ let lastSendIntentAt = 0;
 let isProcessing = false;
 let lastInjectedContent = '';
 let lastErrorMessage = '';
+let lastBootStatusMessage = '';
 let registeredFunctionTools = [];
 
 // ─── 工具函数 ─────────────────────────────────────────────────────────────────
@@ -125,6 +127,9 @@ function migrateLegacySettings(settings) {
     if (!Object.hasOwn(settings.bridge, 'bootUri')) {
         settings.bridge.bootUri = settings.bootUri ?? DEFAULT_SETTINGS.bridge.bootUri;
     }
+    if (!Object.hasOwn(settings.bridge, 'testSnippet')) {
+        settings.bridge.testSnippet = DEFAULT_SETTINGS.bridge.testSnippet;
+    }
 
     if (!Object.hasOwn(settings.toolExposure, 'enabled')) {
         settings.toolExposure.enabled = settings.workMode === 'tool-exposed';
@@ -186,6 +191,13 @@ function resetMcpClient() {
     mcpClient = null;
 }
 
+function resetBridgeRuntimeState() {
+    lastSendIntentAt = 0;
+    isProcessing = false;
+    lastInjectedContent = '';
+    updateLastInjectPreview('');
+}
+
 function getErrorMessage(error) {
     if (!error) return '未知错误';
     if (typeof error === 'string') return error;
@@ -195,6 +207,11 @@ function getErrorMessage(error) {
 
 function setLastErrorMessage(message) {
     lastErrorMessage = message || '';
+}
+
+function setLastBootStatus(message) {
+    lastBootStatusMessage = message || '';
+    updateBootStatusUI(lastBootStatusMessage);
 }
 
 function getRequestHeaders(options = {}) {
@@ -802,6 +819,34 @@ function buildInjectedMessage(userInput, memoryContent) {
     return userInput + block;
 }
 
+function hasInjectedMemoryBlock(text, settings = getSettings()) {
+    const content = String(text || '');
+    if (!content.trim()) return false;
+    const tag = getBridgeSettings(settings).injectTag?.trim();
+    if (tag) {
+        return content.includes(`\n\n${tag}\n`) && content.includes(`\n${tag}`);
+    }
+    const memory = lastInjectedContent?.trim();
+    return !!memory && content.includes(memory);
+}
+
+function shouldRunBridgeRecall(type, params, dryRun, settings = getSettings()) {
+    const bridge = getBridgeSettings(settings);
+    if (!isBridgeMode(settings)) return false;
+    if (!bridge.enabled) return false;
+    if (dryRun) return false;
+    if (isProcessing) return false;
+    if (type === 'quiet') return false;
+    if (params?.quiet_prompt) return false;
+    if (params?.automatic_trigger) return false;
+    return true;
+}
+
+function applyInjectedPreview(memory) {
+    lastInjectedContent = memory || '';
+    updateLastInjectPreview(lastInjectedContent);
+}
+
 // ─── 发送意图检测 ─────────────────────────────────────────────────────────────
 
 function markSendIntent() { lastSendIntentAt = Date.now(); }
@@ -833,34 +878,30 @@ function installSendIntentHooks() {
 // ─── 核心拦截逻辑 ─────────────────────────────────────────────────────────────
 
 async function onGenerationAfterCommands(type, params, dryRun) {
-    if (!isBridgeMode()) return;
-    if (!getBridgeSettings().enabled) return;
-    if (dryRun) return;
-    if (isProcessing) return;
-    if (type === 'quiet') return;
-    if (params?.quiet_prompt) return;
-    if (params?.automatic_trigger) return;
+    const settings = getSettings();
+    if (!shouldRunBridgeRecall(type, params, dryRun, settings)) return;
 
     const { chat } = SillyTavern.getContext();
     if (!chat?.length) return;
 
-    // 策略1：最新楼层是用户消息且未处理
     const lastMsg = chat[chat.length - 1];
     if (lastMsg?.is_user && !lastMsg.__mb_processed) {
-        const userText = lastMsg.mes;
-        if (!userText?.trim()) return;
+        const userText = String(lastMsg.mes || '');
+        if (!userText.trim()) return;
+        if (hasInjectedMemoryBlock(userText, settings)) {
+            lastMsg.__mb_processed = true;
+            return;
+        }
         lastMsg.__mb_processed = true;
         isProcessing = true;
         try {
             const memory = await recallMemory(userText);
-            if (memory) {
-                const injected = buildInjectedMessage(userText, memory);
-                lastMsg.mes = injected;
-                params.prompt = injected;
-                lastInjectedContent = memory;
-                updateLastInjectPreview(memory);
-                log('策略1注入成功, 记忆长度:', memory.length);
-            }
+            if (!memory) return;
+            const injected = buildInjectedMessage(userText, memory);
+            lastMsg.mes = injected;
+            params.prompt = injected;
+            applyInjectedPreview(memory);
+            log('策略1注入成功, 记忆长度:', memory.length);
         } catch (err) {
             logError('策略1处理失败:', err);
         } finally {
@@ -869,24 +910,25 @@ async function onGenerationAfterCommands(type, params, dryRun) {
         return;
     }
 
-    // 策略2：输入框有文本 + 近期发送意图
     if (!isRecentSendIntent()) return;
     const textarea = (window.parent || window).document.getElementById('send_textarea');
-    const textInBox = textarea?.value?.trim();
-    if (!textInBox) return;
+    const textInBox = String(textarea?.value || '');
+    if (!textInBox.trim()) return;
+    if (hasInjectedMemoryBlock(textInBox, settings)) {
+        lastSendIntentAt = 0;
+        return;
+    }
 
     isProcessing = true;
     try {
         const memory = await recallMemory(textInBox);
-        if (memory) {
-            const injected = buildInjectedMessage(textInBox, memory);
-            textarea.value = injected;
-            textarea.dispatchEvent(new Event('input', { bubbles: true }));
-            try { params.prompt = injected; } catch (_) { /* ignore */ }
-            lastInjectedContent = memory;
-            updateLastInjectPreview(memory);
-            log('策略2注入成功, 记忆长度:', memory.length);
-        }
+        if (!memory) return;
+        const injected = buildInjectedMessage(textInBox, memory);
+        textarea.value = injected;
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        try { params.prompt = injected; } catch (_) { /* ignore */ }
+        applyInjectedPreview(memory);
+        log('策略2注入成功, 记忆长度:', memory.length);
     } catch (err) {
         logError('策略2处理失败:', err);
     } finally {
@@ -899,15 +941,24 @@ async function onGenerationAfterCommands(type, params, dryRun) {
 
 async function loadBootMemory() {
     const bridge = getBridgeSettings();
-    if (!isBridgeMode() || !bridge.bootEnabled || !bridge.bootUri) return;
+    if (!isBridgeMode() || !bridge.bootEnabled || !bridge.bootUri) {
+        setLastBootStatus('（当前未启用 Boot Memory）');
+        return;
+    }
     log('加载 Boot Memory:', bridge.bootUri);
     const content = await readMemory(bridge.bootUri);
-    if (!content) return;
+    if (!content) {
+        setLastBootStatus(`Boot 读取失败或无内容：${bridge.bootUri}`);
+        return;
+    }
     try {
         const { setExtensionPrompt, extension_prompt_types } = SillyTavern.getContext();
         setExtensionPrompt(EXT_NAME + '_boot', content, extension_prompt_types.IN_PROMPT, 0);
+        setLastBootStatus(`Boot 已加载：${bridge.bootUri}（${content.length} 字符）`);
         log('Boot Memory 已注入, 长度:', content.length);
     } catch (err) {
+        const message = `Boot 注入失败：${getErrorMessage(err)}`;
+        setLastBootStatus(message);
         logError('Boot Memory 注入失败:', err);
     }
 }
@@ -935,6 +986,18 @@ function updateLastInjectPreview(content) {
         el.classList.remove('empty');
     } else {
         el.textContent = '（尚未注入）';
+        el.classList.add('empty');
+    }
+}
+
+function updateBootStatusUI(content) {
+    const el = document.getElementById('mb-boot-status');
+    if (!el) return;
+    if (content) {
+        el.textContent = content;
+        el.classList.remove('empty');
+    } else {
+        el.textContent = '（尚未加载）';
         el.classList.add('empty');
     }
 }
@@ -981,11 +1044,13 @@ function loadSettingsToUI() {
     set('mb-inject-tag', bridge.injectTag);
     set('mb-boot-enabled', bridge.bootEnabled);
     set('mb-boot-uri', bridge.bootUri);
+    set('mb-test-snippet', bridge.testSnippet);
     set('mb-debug', s.debug);
     updateConnectionModeUI();
     updateWorkModeUI();
     updateStatusUI(connectionState);
     updateLastInjectPreview(lastInjectedContent);
+    updateBootStatusUI(lastBootStatusMessage);
 }
 
 function saveSettingsFromUI() {
@@ -1004,6 +1069,7 @@ function saveSettingsFromUI() {
     s.bridge.injectTag = get('mb-inject-tag')?.value ?? '[记忆参考]';
     s.bridge.bootEnabled = get('mb-boot-enabled')?.checked ?? false;
     s.bridge.bootUri = get('mb-boot-uri')?.value?.trim() ?? 'system://boot';
+    s.bridge.testSnippet = get('mb-test-snippet')?.value ?? '';
     s.toolExposure.enabled = get('mb-tool-exposure-enabled')?.checked ?? false;
     s.toolExposure.stealth = get('mb-tool-stealth')?.checked ?? true;
     s.toolExposure.selectedTools = Object.fromEntries(
@@ -1012,6 +1078,34 @@ function saveSettingsFromUI() {
     s.debug = get('mb-debug')?.checked ?? false;
     extensionSettings[EXT_NAME] = s;
     saveSettingsDebounced();
+}
+
+async function runRecallPreview(query) {
+    const text = String(query || '').trim();
+    if (!text) {
+        updateLastInjectPreview('');
+        return { ok: false, result: '', message: '请输入要测试的文本片段' };
+    }
+    const result = await recallMemory(text);
+    updateLastInjectPreview(result || '');
+    if (!result) {
+        return { ok: true, result: '', message: '未找到相关记忆' };
+    }
+    return { ok: true, result, message: `召回 ${result.length} 字符` };
+}
+
+function previewInjectedSnippet(snippet) {
+    const text = String(snippet || '').trim();
+    if (!text) {
+        updateLastInjectPreview('');
+        return { ok: false, message: '请输入要预演的文本片段' };
+    }
+    if (!lastInjectedContent?.trim()) {
+        return { ok: false, message: '请先完成一次召回，再预演注入' };
+    }
+    const preview = buildInjectedMessage(text, lastInjectedContent);
+    updateLastInjectPreview(preview);
+    return { ok: true, message: `已生成注入预演（${preview.length} 字符）` };
 }
 
 function bindSettingsEvents() {
@@ -1080,16 +1174,29 @@ function bindSettingsEvents() {
         const textarea = (window.parent || window).document.getElementById('send_textarea');
         const query = textarea?.value?.trim() || '测试';
         toastr.info('正在召回...', 'Memory Bridge');
-        const result = await recallMemory(query);
-        updateLastInjectPreview(result || '（无结果）');
-        toastr[result ? 'success' : 'warning'](
-            result ? `召回 ${result.length} 字符` : '未找到相关记忆',
-            'Memory Bridge',
-        );
+        const { ok, result, message } = await runRecallPreview(query);
+        toastr[ok ? (result ? 'success' : 'warning') : 'warning'](message, 'Memory Bridge');
+    });
+
+    document.getElementById('mb-btn-test-snippet')?.addEventListener('click', async () => {
+        saveSettingsFromUI();
+        const query = document.getElementById('mb-test-snippet')?.value ?? '';
+        toastr.info('正在测试文本片段召回...', 'Memory Bridge');
+        const { ok, result, message } = await runRecallPreview(query);
+        toastr[ok ? (result ? 'success' : 'warning') : 'warning'](message, 'Memory Bridge');
+    });
+
+    document.getElementById('mb-btn-preview-snippet')?.addEventListener('click', () => {
+        saveSettingsFromUI();
+        const query = document.getElementById('mb-test-snippet')?.value ?? '';
+        const { ok, message } = previewInjectedSnippet(query);
+        toastr[ok ? 'success' : 'warning'](message, 'Memory Bridge');
     });
 
     document.getElementById('mb-btn-clear-session')?.addEventListener('click', () => {
         resetMcpClient();
+        resetBridgeRuntimeState();
+        setLastBootStatus('（会话已清除，等待重新加载）');
         setConnectionState('disconnected');
         toastr.info('会话已清除', 'Memory Bridge');
     });
@@ -1124,8 +1231,8 @@ jQuery(async () => {
 
     // 切换聊天时加载 Boot Memory
     eventSource.on(event_types.CHAT_CHANGED, async () => {
-        lastSendIntentAt = 0;
-        isProcessing = false;
+        resetBridgeRuntimeState();
+        setLastBootStatus('正在加载 Boot Memory...');
         await loadBootMemory();
     });
 

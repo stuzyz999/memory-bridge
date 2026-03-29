@@ -148,10 +148,21 @@
           <label for="mb-debug">控制台调试日志</label>
         </div>
 
+        <div class="mb-row mb-row-top" data-mb-mode="bridge">
+          <label for="mb-test-snippet">文本片段</label>
+          <textarea id="mb-test-snippet" placeholder="输入存在于 nocturne_memory 记忆正文中的关键词或片段，用于独立测试 recall。"></textarea>
+        </div>
+        <div class="mb-hint" data-mb-mode="bridge">`search_memory` 是全文检索。测试时尽量使用记忆正文中真实出现过的关键词，而不是模糊语义描述。</div>
+
         <div class="mb-btn-row">
           <button class="mb-btn" id="mb-btn-test-recall">测试召回（当前输入框）</button>
+          <button class="mb-btn" id="mb-btn-test-snippet">测试召回（文本片段）</button>
+          <button class="mb-btn" id="mb-btn-preview-snippet">预演注入（文本片段）</button>
           <button class="mb-btn" id="mb-btn-clear-session">清除会话</button>
         </div>
+
+        <div class="mb-section-title" style="margin-top:8px;">Boot 状态</div>
+        <div class="mb-inject-preview empty" id="mb-boot-status">（尚未加载）</div>
 
         <div class="mb-section-title" style="margin-top:8px;">上次注入预览</div>
         <div class="mb-inject-preview empty" id="mb-last-inject">（尚未注入）</div>
