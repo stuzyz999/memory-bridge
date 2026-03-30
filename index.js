@@ -23,6 +23,47 @@ const DEFAULT_MCP_CONFIG_JSON = JSON.stringify({
 
 // ─── 默认设置 ─────────────────────────────────────────────────────────────────
 
+const DEFAULT_LLM_PROMPTS = [
+    {
+        id: 'mainPrompt',
+        name: '主系统提示词',
+        role: 'system',
+        content: [
+            '你是 Memory Bridge 的记忆整理助手。',
+            '你的职责是将聊天内容整理为适合长期记忆写入与检索的文本。',
+            '保持事实、关系、状态变化与关键表达，不编造，不扩写，不改变原意。',
+            '输出应稳定、简洁、可复用，优先服务 MCP 记忆写入、召回查询改写与结果整理。',
+        ].join('\n'),
+    },
+    {
+        id: 'importPrompt',
+        name: '历史导入处理指令',
+        role: 'user',
+        content: [
+            '请将以下聊天楼层整理为适合写入长期记忆的内容。',
+            '保留：角色、事实、关系、状态变化、设定、事件结论。',
+            '删除：明显噪音、重复表述、无意义口头禅。',
+            '输出纯文本，不要使用 Markdown 标题，不要解释你的步骤。',
+            '',
+            '原始楼层：',
+            '{{input}}',
+        ].join('\n'),
+    },
+    {
+        id: 'recallPrompt',
+        name: '召回查询处理指令',
+        role: 'user',
+        content: [
+            '请将以下用户输入整理为适合全文检索的召回查询。',
+            '提炼核心人物、地点、事件、关系与关键短语。',
+            '输出单段纯文本查询，不要解释。',
+            '',
+            '用户输入：',
+            '{{input}}',
+        ].join('\n'),
+    },
+];
+
 function createDefaultLlmPreset(name = '默认预设') {
     return {
         id: `llm-preset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -36,7 +77,7 @@ function createDefaultLlmPreset(name = '默认预设') {
         temperature: 0.7,
         maxTokens: 2000,
         useMainApi: true,
-        prompts: JSON.parse(JSON.stringify(DEFAULT_SETTINGS.llm.prompts)),
+        prompts: JSON.parse(JSON.stringify(DEFAULT_LLM_PROMPTS)),
     };
 }
 
@@ -79,46 +120,7 @@ const DEFAULT_SETTINGS = {
                 temperature: 0.7,
                 maxTokens: 2000,
                 useMainApi: true,
-                prompts: [
-                    {
-                        id: 'mainPrompt',
-                        name: '主系统提示词',
-                        role: 'system',
-                        content: [
-                            '你是 Memory Bridge 的记忆整理助手。',
-                            '你的职责是将聊天内容整理为适合长期记忆写入与检索的文本。',
-                            '保持事实、关系、状态变化与关键表达，不编造，不扩写，不改变原意。',
-                            '输出应稳定、简洁、可复用，优先服务 MCP 记忆写入、召回查询改写与结果整理。',
-                        ].join('\n'),
-                    },
-                    {
-                        id: 'importPrompt',
-                        name: '历史导入处理指令',
-                        role: 'user',
-                        content: [
-                            '请将以下聊天楼层整理为适合写入长期记忆的内容。',
-                            '保留：角色、事实、关系、状态变化、设定、事件结论。',
-                            '删除：明显噪音、重复表述、无意义口头禅。',
-                            '输出纯文本，不要使用 Markdown 标题，不要解释你的步骤。',
-                            '',
-                            '原始楼层：',
-                            '{{input}}',
-                        ].join('\n'),
-                    },
-                    {
-                        id: 'recallPrompt',
-                        name: '召回查询处理指令',
-                        role: 'user',
-                        content: [
-                            '请将以下用户输入整理为适合全文检索的召回查询。',
-                            '提炼核心人物、地点、事件、关系与关键短语。',
-                            '输出单段纯文本查询，不要解释。',
-                            '',
-                            '用户输入：',
-                            '{{input}}',
-                        ].join('\n'),
-                    },
-                ],
+                prompts: JSON.parse(JSON.stringify(DEFAULT_LLM_PROMPTS)),
             },
         ],
     },
@@ -243,7 +245,7 @@ function migrateLegacySettings(settings) {
         ...createDefaultLlmPreset(preset?.name || `预设 ${index + 1}`),
         ...preset,
         id: preset?.id || `llm-preset-${index + 1}`,
-        prompts: Array.isArray(preset?.prompts) ? preset.prompts : JSON.parse(JSON.stringify(DEFAULT_SETTINGS.llm.presets[0].prompts)),
+        prompts: Array.isArray(preset?.prompts) ? preset.prompts : JSON.parse(JSON.stringify(DEFAULT_LLM_PROMPTS)),
     }));
     if (!settings.llm.presets.some(preset => preset.id === settings.llm.selectedPresetId)) {
         settings.llm.selectedPresetId = settings.llm.presets[0].id;
