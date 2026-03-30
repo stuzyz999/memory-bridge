@@ -341,13 +341,15 @@ function normalizeJsonHttpServer(serverName, serverConfig) {
     const headers = serverConfig.headers && typeof serverConfig.headers === 'object'
         ? Object.fromEntries(Object.entries(serverConfig.headers).filter(([, value]) => value != null))
         : {};
+    // 插件后端注册名加 -http 后缀，避免与同名 stdio server 冲突
+    const pluginServerName = `${serverName}-http`;
     return {
         source: 'json',
         transport: 'streamable-http',
         url,
         headers,
         label: serverName,
-        serverName,
+        serverName: pluginServerName,
         usePluginRegistry: true,
     };
 }
