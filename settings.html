@@ -158,16 +158,74 @@
           <textarea id="mb-import-disclosure" placeholder="当需要回想这段聊天内容时"></textarea>
         </div>
 
+        <div class="mb-section-title" style="margin-top:8px;">筛选候选集</div>
+
         <div class="mb-row">
-          <label for="mb-import-limit">显示条数</label>
+          <label for="mb-import-filter-mode">范围模式</label>
+          <select id="mb-import-filter-mode">
+            <option value="recent">最近 N 条</option>
+            <option value="range">楼层区间</option>
+          </select>
+        </div>
+
+        <div class="mb-row" data-mb-import-filter-mode="recent">
+          <label for="mb-import-limit">最近条数</label>
           <input type="number" id="mb-import-limit" min="1" max="200" value="20" style="max-width:90px;" />
         </div>
 
+        <div class="mb-row" data-mb-import-filter-mode="range">
+          <label for="mb-import-range-start">起始楼层</label>
+          <input type="number" id="mb-import-range-start" min="1" placeholder="1" style="max-width:90px;" />
+          <span class="mb-inline-sep">~</span>
+          <label for="mb-import-range-end" class="mb-inline-label">结束楼层</label>
+          <input type="number" id="mb-import-range-end" min="1" placeholder="40" style="max-width:90px;" />
+        </div>
+
+        <div class="mb-row">
+          <label for="mb-import-role-filter">角色过滤</label>
+          <select id="mb-import-role-filter">
+            <option value="all">全部</option>
+            <option value="user">仅用户</option>
+            <option value="assistant">仅助手</option>
+          </select>
+        </div>
+
+        <div class="mb-row">
+          <label for="mb-import-keyword">关键词</label>
+          <input type="text" id="mb-import-keyword" placeholder="正文或名称包含..." />
+        </div>
+
+        <div class="mb-toggle-row">
+          <input type="checkbox" id="mb-import-non-empty-only" />
+          <label for="mb-import-non-empty-only">仅保留非空正文</label>
+        </div>
+
+        <div class="mb-section-title" style="margin-top:8px;">批量选择</div>
+
         <div class="mb-btn-row">
           <button class="mb-btn" id="mb-btn-refresh-import-list">刷新楼层列表</button>
-          <button class="mb-btn" id="mb-btn-select-all-import">全选当前列表</button>
+          <button class="mb-btn" id="mb-btn-select-all-import">全选可见项</button>
           <button class="mb-btn" id="mb-btn-clear-import">清空选择</button>
+          <button class="mb-btn" id="mb-btn-invert-import">反选可见项</button>
+        </div>
+
+        <div class="mb-row">
+          <label for="mb-import-bulk-range">区间选中</label>
+          <input type="text" id="mb-import-bulk-range" placeholder="20-40 / 20~40" />
+          <button class="mb-btn" id="mb-btn-apply-import-range">应用</button>
+        </div>
+
+        <div class="mb-btn-row">
+          <button class="mb-btn" id="mb-btn-select-visible-user">仅选用户</button>
+          <button class="mb-btn" id="mb-btn-select-visible-assistant">仅选助手</button>
           <button class="mb-btn primary" id="mb-btn-import-selected">导入选中楼层</button>
+        </div>
+
+        <div class="mb-import-summary-grid">
+          <div class="mb-import-summary-card"><span>当前可见</span><b id="mb-import-visible-count">0</b></div>
+          <div class="mb-import-summary-card"><span>当前已选</span><b id="mb-import-selected-count">0</b></div>
+          <div class="mb-import-summary-card"><span>导入目标</span><b id="mb-import-target-uri">core://</b></div>
+          <div class="mb-import-summary-card"><span>标题前缀</span><b id="mb-import-title-preview">chat</b></div>
         </div>
 
         <div class="mb-hint" id="mb-import-summary">0 条可导入</div>
@@ -227,6 +285,18 @@
         <div class="mb-row" data-mb-llm-source="custom">
           <label for="mb-llm-model">模型</label>
           <input type="text" id="mb-llm-model" placeholder="gpt-4.1 / claude-sonnet-4-6 / 自定义模型名" />
+        </div>
+
+        <div class="mb-btn-row" data-mb-llm-source="custom">
+          <button class="mb-btn" id="mb-btn-fetch-models">拉取模型列表</button>
+          <button class="mb-btn" id="mb-btn-test-llm">测试响应</button>
+        </div>
+
+        <div class="mb-row" data-mb-llm-source="custom">
+          <label for="mb-llm-model-list">可用模型</label>
+          <select id="mb-llm-model-list">
+            <option value="">（先拉取模型列表）</option>
+          </select>
         </div>
 
         <div class="mb-row">

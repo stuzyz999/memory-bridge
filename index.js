@@ -103,7 +103,13 @@ const DEFAULT_SETTINGS = {
         parentUri: 'core://',
         titlePrefix: 'chat',
         disclosure: '当需要回想这段聊天内容时',
+        filterMode: 'recent',
         limit: 20,
+        rangeStart: '',
+        rangeEnd: '',
+        roleFilter: 'all',
+        keyword: '',
+        nonEmptyOnly: true,
     },
     llm: {
         selectedPresetId: 'default',
@@ -143,6 +149,7 @@ let lastErrorMessage = '';
 let lastBootStatusMessage = '';
 let registeredFunctionTools = [];
 let importSelection = new Set();
+let importLastClickedVisibleIndex = null;
 
 // ─── 工具函数 ─────────────────────────────────────────────────────────────────
 
@@ -230,8 +237,26 @@ function migrateLegacySettings(settings) {
     if (!Object.hasOwn(settings.import, 'disclosure')) {
         settings.import.disclosure = DEFAULT_SETTINGS.import.disclosure;
     }
+    if (!Object.hasOwn(settings.import, 'filterMode')) {
+        settings.import.filterMode = DEFAULT_SETTINGS.import.filterMode;
+    }
     if (!Object.hasOwn(settings.import, 'limit')) {
         settings.import.limit = DEFAULT_SETTINGS.import.limit;
+    }
+    if (!Object.hasOwn(settings.import, 'rangeStart')) {
+        settings.import.rangeStart = DEFAULT_SETTINGS.import.rangeStart;
+    }
+    if (!Object.hasOwn(settings.import, 'rangeEnd')) {
+        settings.import.rangeEnd = DEFAULT_SETTINGS.import.rangeEnd;
+    }
+    if (!Object.hasOwn(settings.import, 'roleFilter')) {
+        settings.import.roleFilter = DEFAULT_SETTINGS.import.roleFilter;
+    }
+    if (!Object.hasOwn(settings.import, 'keyword')) {
+        settings.import.keyword = DEFAULT_SETTINGS.import.keyword;
+    }
+    if (!Object.hasOwn(settings.import, 'nonEmptyOnly')) {
+        settings.import.nonEmptyOnly = DEFAULT_SETTINGS.import.nonEmptyOnly;
     }
 
     if (!Object.hasOwn(settings.llm, 'selectedPresetId')) {
@@ -720,9 +745,6 @@ function createPluginBackedClient(config) {
             }
 
             if (method === 'tools/list') {
-                if (!shouldExposeTools()) {
-                    throw new Error('当前模式未启用工具暴露');
-                }
                 const tools = await pluginFetch(`/servers/${encodeURIComponent(serverName)}/list-tools`, null, 'GET');
                 return {
                     ok: true,
@@ -737,9 +759,6 @@ function createPluginBackedClient(config) {
             }
 
             if (method === 'tools/call') {
-                if (!shouldExposeTools()) {
-                    throw new Error('当前模式未启用工具暴露');
-                }
                 const result = await pluginFetch(`/servers/${encodeURIComponent(serverName)}/call-tool`, {
                     toolName: params.name,
                     arguments: params.arguments ?? {},
@@ -984,14 +1003,15 @@ async function createMemory(args) {
 function getChatMessagesForImport() {
     const context = SillyTavern.getContext();
     const chat = Array.isArray(context.chat) ? context.chat : [];
-    return chat
-        .map((message, index) => ({
-            index,
-            isUser: !!message?.is_user,
-            name: String(message?.name || (message?.is_user ? 'User' : 'Assistant') || ''),
-            text: String(message?.mes || ''),
-        }))
-        .filter(message => message.text.trim());
+    return chat.map((message, index) => ({
+        index,
+        visibleOrder: index,
+        floor: index + 1,
+        isUser: !!message?.is_user,
+        role: message?.is_user ? 'user' : 'assistant',
+        name: String(message?.name || (message?.is_user ? 'User' : 'Assistant') || ''),
+        text: String(message?.mes || ''),
+    }));
 }
 
 function getImportTitle(index, settings = getSettings()) {
@@ -1002,6 +1022,112 @@ function getImportTitle(index, settings = getSettings()) {
 function buildImportContent(message) {
     const role = message.isUser ? 'user' : 'assistant';
     return `[${role}] ${message.name}\n${message.text.trim()}`;
+}
+
+function escapeHtml(value) {
+    return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function normalizeImportRangeValue(value) {
+    const normalized = parseInt(String(value ?? '').trim(), 10);
+    return Number.isFinite(normalized) && normalized > 0 ? normalized : null;
+}
+
+function getImportFilterState(settings = getSettings()) {
+    const importSettings = getImportSettings(settings);
+    return {
+        filterMode: importSettings.filterMode === 'range' ? 'range' : 'recent',
+        limit: Math.max(1, parseInt(importSettings.limit, 10) || 20),
+        rangeStart: normalizeImportRangeValue(importSettings.rangeStart),
+        rangeEnd: normalizeImportRangeValue(importSettings.rangeEnd),
+        roleFilter: ['all', 'user', 'assistant'].includes(importSettings.roleFilter) ? importSettings.roleFilter : 'all',
+        keyword: String(importSettings.keyword || '').trim().toLowerCase(),
+        nonEmptyOnly: importSettings.nonEmptyOnly !== false,
+    };
+}
+
+function filterImportMessages(messages, settings = getSettings()) {
+    const filters = getImportFilterState(settings);
+    let visibleMessages = Array.isArray(messages) ? [...messages] : [];
+
+    if (filters.nonEmptyOnly) {
+        visibleMessages = visibleMessages.filter(message => message.text.trim());
+    }
+
+    if (filters.filterMode === 'range') {
+        let start = filters.rangeStart;
+        let end = filters.rangeEnd;
+        if (start != null && end != null && start > end) {
+            [start, end] = [end, start];
+        }
+        visibleMessages = visibleMessages.filter((message) => {
+            if (start != null && message.floor < start) return false;
+            if (end != null && message.floor > end) return false;
+            return true;
+        });
+    } else {
+        visibleMessages = visibleMessages.slice(Math.max(0, visibleMessages.length - filters.limit));
+    }
+
+    if (filters.roleFilter !== 'all') {
+        visibleMessages = visibleMessages.filter(message => message.role === filters.roleFilter);
+    }
+
+    if (filters.keyword) {
+        visibleMessages = visibleMessages.filter((message) => {
+            const haystack = `${message.name}\n${message.text}`.toLowerCase();
+            return haystack.includes(filters.keyword);
+        });
+    }
+
+    return visibleMessages.map((message, visibleOrder) => ({ ...message, visibleOrder }));
+}
+
+function getVisibleImportMessages(settings = getSettings()) {
+    return filterImportMessages(getChatMessagesForImport(), settings);
+}
+
+function applySelectionToVisibleMessages(visibleMessages, shouldSelect) {
+    visibleMessages.forEach((message) => {
+        if (shouldSelect(message)) {
+            importSelection.add(message.index);
+        } else {
+            importSelection.delete(message.index);
+        }
+    });
+}
+
+function updateImportFilterModeUI() {
+    const mode = document.getElementById('mb-import-filter-mode')?.value ?? 'recent';
+    document.querySelectorAll('[data-mb-import-filter-mode="recent"]').forEach(section => {
+        section.classList.toggle('mb-hidden', mode !== 'recent');
+    });
+    document.querySelectorAll('[data-mb-import-filter-mode="range"]').forEach(section => {
+        section.classList.toggle('mb-hidden', mode !== 'range');
+    });
+}
+
+function updateImportSummaryCards({ visibleMessages = [], selectedMessages = [], settings = getSettings() } = {}) {
+    const importSettings = getImportSettings(settings);
+    const visibleCount = document.getElementById('mb-import-visible-count');
+    const selectedCount = document.getElementById('mb-import-selected-count');
+    const targetUri = document.getElementById('mb-import-target-uri');
+    const titlePreview = document.getElementById('mb-import-title-preview');
+    if (visibleCount) visibleCount.textContent = String(visibleMessages.length);
+    if (selectedCount) selectedCount.textContent = String(selectedMessages.length);
+    if (targetUri) targetUri.textContent = importSettings.parentUri?.trim() || '（未填写）';
+    if (titlePreview) titlePreview.textContent = importSettings.titlePrefix?.trim() || 'chat';
+}
+
+function parseImportBulkRange(value) {
+    const text = String(value || '').trim();
+    if (!text) return null;
+    const match = text.match(/^(\d+)\s*(?:[-~～—]{1}|\.\.)\s*(\d+)$/);
+    if (!match) return null;
+    const start = parseInt(match[1], 10);
+    const end = parseInt(match[2], 10);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0) return null;
+    return start <= end ? { start, end } : { start: end, end: start };
 }
 
 function fillPromptTemplate(template, variables = {}) {
@@ -1104,34 +1230,43 @@ function renderImportList() {
     if (!container || !summary) return;
 
     const settings = getSettings();
-    const limit = Math.max(1, parseInt(getImportSettings(settings).limit, 10) || 20);
-    const messages = getChatMessagesForImport();
-    const visibleMessages = messages.slice(Math.max(0, messages.length - limit));
-    const visibleIndexes = new Set(visibleMessages.map(message => message.index));
+    const visibleMessages = getVisibleImportMessages(settings);
+    const allMessages = getChatMessagesForImport();
+    const messageMap = new Map(allMessages.map(message => [message.index, message]));
+    const selectedMessages = Array.from(importSelection)
+        .sort((left, right) => left - right)
+        .map(index => messageMap.get(index))
+        .filter(Boolean)
+        .filter(message => message.text.trim());
 
-    importSelection = new Set(Array.from(importSelection).filter(index => visibleIndexes.has(index)));
+    updateImportFilterModeUI();
+    updateImportSummaryCards({ visibleMessages, selectedMessages, settings });
 
     if (!visibleMessages.length) {
-        container.innerHTML = '<div class="mb-hint">当前聊天没有可导入的正文楼层。</div>';
+        importLastClickedVisibleIndex = null;
+        container.innerHTML = '<div class="mb-hint">当前筛选条件下没有可导入楼层。</div>';
         summary.textContent = '0 条可导入';
         return;
     }
 
-    summary.textContent = `显示最近 ${visibleMessages.length} 条可导入楼层，已选 ${importSelection.size} 条`;
+    const firstVisibleFloor = visibleMessages[0]?.floor;
+    const lastVisibleFloor = visibleMessages[visibleMessages.length - 1]?.floor;
+    const rangeText = firstVisibleFloor && lastVisibleFloor
+        ? `#${firstVisibleFloor}-${lastVisibleFloor}`
+        : '无';
+    summary.textContent = `当前可见 ${visibleMessages.length} 条，已选 ${selectedMessages.length} 条，范围 ${rangeText}`;
     container.innerHTML = visibleMessages.map((message) => {
         const checked = importSelection.has(message.index) ? 'checked' : '';
         const role = message.isUser ? '用户' : '助手';
         const title = getImportTitle(message.index, settings);
-        const preview = message.text.replace(/\s+/g, ' ').slice(0, 120);
-        const escapedName = message.name.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const escapedPreview = preview.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const preview = message.text.replace(/\s+/g, ' ').trim().slice(0, 120);
         return `
-            <label class="mb-import-item">
-              <input type="checkbox" class="mb-import-checkbox" data-import-index="${message.index}" ${checked} />
-              <span>
-                <b>#${message.index + 1} · ${role} · ${title}</b><br>
-                <small>${escapedName}</small><br>
-                <small>${escapedPreview || '（空文本）'}</small>
+            <label class="mb-import-item" data-visible-order="${message.visibleOrder}">
+              <input type="checkbox" class="mb-import-checkbox" data-import-index="${message.index}" data-visible-order="${message.visibleOrder}" ${checked} />
+              <span class="mb-import-item-body">
+                <b>#${message.floor} · ${role} · ${escapeHtml(title)}</b><br>
+                <small>${escapeHtml(message.name)}</small><br>
+                <small>${escapeHtml(preview || '（空文本）')}</small>
               </span>
             </label>
         `;
@@ -1144,7 +1279,8 @@ function collectSelectedImportMessages() {
     return Array.from(importSelection)
         .sort((left, right) => left - right)
         .map(index => messageMap.get(index))
-        .filter(Boolean);
+        .filter(Boolean)
+        .filter(message => message.text.trim());
 }
 
 async function runSelectedImport() {
@@ -1393,6 +1529,55 @@ function updateConnectionModeUI() {
     jsonSection?.classList.toggle('mb-hidden', mode !== 'json');
 }
 
+function renderLlmModelOptions(models = [], selectedModel = '') {
+    const select = document.getElementById('mb-llm-model-list');
+    if (!select) return;
+    if (!Array.isArray(models) || !models.length) {
+        select.innerHTML = '<option value="">（先拉取模型列表）</option>';
+        return;
+    }
+    select.innerHTML = [
+        '<option value="">（选择模型写入上方输入框）</option>',
+        ...models.map((model) => {
+            const value = String(model?.id || model?.name || '');
+            const safe = value.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const selected = value === selectedModel ? 'selected' : '';
+            return `<option value="${safe}" ${selected}>${safe}</option>`;
+        }),
+    ].join('');
+}
+
+async function fetchOpenAiCompatibleModels(apiUrl, apiKey) {
+    const baseUrl = String(apiUrl || '').trim().replace(/\/chat\/completions$/i, '').replace(/\/+$/, '');
+    if (!baseUrl) {
+        throw new Error('请先填写 API URL');
+    }
+    const response = await fetch(`${baseUrl}/models`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+            ...(apiKey?.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : {}),
+        },
+    });
+    if (!response.ok) {
+        throw new Error(`模型列表拉取失败: HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    return (data?.data || data || []).map((item) => ({
+        id: item?.id || item?.model || item?.name,
+        name: item?.name || item?.id || item?.model,
+    })).filter(item => item.id);
+}
+
+async function testCurrentLlmPreset(settings = getSettings()) {
+    const preset = getCurrentLlmPreset(settings);
+    const messages = buildPromptMessages('recallPrompt', { input: '测试：阿洲，中村圆，地下停车场。' }, settings);
+    if (!messages.length) {
+        throw new Error('当前提示词为空');
+    }
+    return await callLlm(messages, { maxTokens: Math.min(Number(preset.maxTokens) || 2000, 300) });
+}
+
 function renderLlmPresetOptions() {
     const select = document.getElementById('mb-llm-preset');
     if (!select) return;
@@ -1484,10 +1669,14 @@ function loadSettingsToUI() {
     set('mb-boot-uri', bridge.bootUri);
     set('mb-test-snippet', bridge.testSnippet);
     const importSettings = getImportSettings(s);
-    set('mb-import-parent-uri', importSettings.parentUri);
-    set('mb-import-title-prefix', importSettings.titlePrefix);
-    set('mb-import-disclosure', importSettings.disclosure);
+    set('mb-import-filter-mode', importSettings.filterMode);
     set('mb-import-limit', importSettings.limit);
+    set('mb-import-range-start', importSettings.rangeStart);
+    set('mb-import-range-end', importSettings.rangeEnd);
+    set('mb-import-role-filter', importSettings.roleFilter);
+    set('mb-import-keyword', importSettings.keyword);
+    set('mb-import-non-empty-only', importSettings.nonEmptyOnly !== false);
+    set('mb-import-bulk-range', '');
     renderLlmPresetOptions();
     const llm = getCurrentLlmPreset(s);
     set('mb-llm-enabled', llm.enabled);
@@ -1499,11 +1688,13 @@ function loadSettingsToUI() {
     set('mb-llm-temperature', llm.temperature);
     set('mb-llm-max-tokens', llm.maxTokens);
     set('mb-llm-use-main-api', llm.useMainApi);
+    renderLlmModelOptions([], llm.model || '');
     set('mb-llm-main-prompt', getPromptById('mainPrompt', s)?.content || '');
     set('mb-llm-import-prompt', getPromptById('importPrompt', s)?.content || '');
     set('mb-llm-recall-prompt', getPromptById('recallPrompt', s)?.content || '');
     set('mb-debug', s.debug);
     updateConnectionModeUI();
+    updateImportFilterModeUI();
     updateWorkModeUI();
     updateLlmSourceUI();
     updateStatusUI(connectionState);
@@ -1533,11 +1724,16 @@ function saveSettingsFromUI() {
     s.bridge.injectTag = get('mb-inject-tag')?.value ?? '[记忆参考]';
     s.bridge.bootEnabled = get('mb-boot-enabled')?.checked ?? false;
     s.bridge.bootUri = get('mb-boot-uri')?.value?.trim() ?? 'system://boot';
-    s.bridge.testSnippet = get('mb-test-snippet')?.value ?? '';
     s.import.parentUri = get('mb-import-parent-uri')?.value?.trim() ?? 'core://';
     s.import.titlePrefix = get('mb-import-title-prefix')?.value?.trim() ?? 'chat';
     s.import.disclosure = get('mb-import-disclosure')?.value?.trim() ?? '当需要回想这段聊天内容时';
+    s.import.filterMode = get('mb-import-filter-mode')?.value ?? 'recent';
     s.import.limit = parseInt(get('mb-import-limit')?.value) || 20;
+    s.import.rangeStart = get('mb-import-range-start')?.value?.trim() ?? '';
+    s.import.rangeEnd = get('mb-import-range-end')?.value?.trim() ?? '';
+    s.import.roleFilter = get('mb-import-role-filter')?.value ?? 'all';
+    s.import.keyword = get('mb-import-keyword')?.value ?? '';
+    s.import.nonEmptyOnly = get('mb-import-non-empty-only')?.checked ?? true;
     s.llm.selectedPresetId = get('mb-llm-preset')?.value ?? s.llm.selectedPresetId ?? 'default';
     syncCurrentLlmPresetFromUI(s);
     s.toolExposure.enabled = get('mb-tool-exposure-enabled')?.checked ?? false;
@@ -1600,6 +1796,57 @@ function bindSettingsEvents() {
     document.getElementById('mb-llm-source')?.addEventListener('change', () => {
         saveSettingsFromUI();
         updateLlmSourceUI();
+    });
+
+    document.getElementById('mb-import-filter-mode')?.addEventListener('change', () => {
+        saveSettingsFromUI();
+        updateImportFilterModeUI();
+        renderImportList();
+    });
+
+    ['mb-import-limit', 'mb-import-range-start', 'mb-import-range-end', 'mb-import-role-filter', 'mb-import-keyword', 'mb-import-non-empty-only', 'mb-import-parent-uri', 'mb-import-title-prefix']
+        .forEach((id) => {
+            document.getElementById(id)?.addEventListener('change', () => {
+                saveSettingsFromUI();
+                renderImportList();
+            });
+        });
+
+    document.getElementById('mb-import-keyword')?.addEventListener('input', () => {
+        saveSettingsFromUI();
+        renderImportList();
+    });
+
+    document.getElementById('mb-btn-fetch-models')?.addEventListener('click', async () => {
+        saveSettingsFromUI();
+        const preset = getCurrentLlmPreset();
+        try {
+            const models = await fetchOpenAiCompatibleModels(preset.apiUrl, preset.apiKey);
+            renderLlmModelOptions(models, preset.model || '');
+            toastr.success(`已获取 ${models.length} 个模型`, 'Memory Bridge');
+        } catch (error) {
+            toastr.error(getErrorMessage(error), 'Memory Bridge');
+        }
+    });
+
+    document.getElementById('mb-llm-model-list')?.addEventListener('change', (event) => {
+        const value = event.target?.value ?? '';
+        const input = document.getElementById('mb-llm-model');
+        if (input && value) {
+            input.value = value;
+            saveSettingsFromUI();
+        }
+    });
+
+    document.getElementById('mb-btn-test-llm')?.addEventListener('click', async () => {
+        saveSettingsFromUI();
+        try {
+            const result = await testCurrentLlmPreset();
+            updateLastInjectPreview(String(result || '').trim() || '（空响应）');
+            toastr.success('LLM 响应测试成功', 'Memory Bridge');
+        } catch (error) {
+            toastr.error(getErrorMessage(error), 'Memory Bridge');
+        }
     });
 
     document.getElementById('mb-llm-preset')?.addEventListener('change', () => {
@@ -1730,30 +1977,84 @@ function bindSettingsEvents() {
     });
 
     document.getElementById('mb-btn-select-all-import')?.addEventListener('click', () => {
-        document.querySelectorAll('.mb-import-checkbox').forEach((el) => {
-            el.checked = true;
-            importSelection.add(Number(el.dataset.importIndex));
-        });
+        const visibleMessages = getVisibleImportMessages();
+        applySelectionToVisibleMessages(visibleMessages, () => true);
         renderImportList();
     });
 
     document.getElementById('mb-btn-clear-import')?.addEventListener('click', () => {
         importSelection.clear();
+        importLastClickedVisibleIndex = null;
         renderImportList();
     });
 
-    document.getElementById('mb-import-list')?.addEventListener('change', (event) => {
+    document.getElementById('mb-btn-invert-import')?.addEventListener('click', () => {
+        const visibleMessages = getVisibleImportMessages();
+        visibleMessages.forEach((message) => {
+            if (importSelection.has(message.index)) {
+                importSelection.delete(message.index);
+            } else {
+                importSelection.add(message.index);
+            }
+        });
+        renderImportList();
+    });
+
+    document.getElementById('mb-btn-apply-import-range')?.addEventListener('click', () => {
+        const rangeInput = document.getElementById('mb-import-bulk-range');
+        const parsed = parseImportBulkRange(rangeInput?.value);
+        if (!parsed) {
+            toastr.warning('请输入有效区间，例如 20-40', 'Memory Bridge');
+            return;
+        }
+        const visibleMessages = getVisibleImportMessages();
+        applySelectionToVisibleMessages(visibleMessages, (message) => message.floor >= parsed.start && message.floor <= parsed.end);
+        renderImportList();
+    });
+
+    document.getElementById('mb-btn-select-visible-user')?.addEventListener('click', () => {
+        const visibleMessages = getVisibleImportMessages();
+        applySelectionToVisibleMessages(visibleMessages, (message) => message.isUser);
+        renderImportList();
+    });
+
+    document.getElementById('mb-btn-select-visible-assistant')?.addEventListener('click', () => {
+        const visibleMessages = getVisibleImportMessages();
+        applySelectionToVisibleMessages(visibleMessages, (message) => !message.isUser);
+        renderImportList();
+    });
+
+    document.getElementById('mb-import-list')?.addEventListener('click', (event) => {
         const target = event.target;
         if (!target?.classList?.contains('mb-import-checkbox')) return;
         const index = Number(target.dataset.importIndex);
-        if (!Number.isFinite(index)) return;
-        if (target.checked) {
+        const visibleOrder = Number(target.dataset.visibleOrder);
+        if (!Number.isFinite(index) || !Number.isFinite(visibleOrder)) return;
+
+        const visibleMessages = getVisibleImportMessages();
+        const shouldCheck = !!target.checked;
+        if (event.shiftKey && importLastClickedVisibleIndex != null) {
+            const start = Math.min(importLastClickedVisibleIndex, visibleOrder);
+            const end = Math.max(importLastClickedVisibleIndex, visibleOrder);
+            visibleMessages
+                .filter(message => message.visibleOrder >= start && message.visibleOrder <= end)
+                .forEach((message) => {
+                    if (shouldCheck) {
+                        importSelection.add(message.index);
+                    } else {
+                        importSelection.delete(message.index);
+                    }
+                });
+        } else if (shouldCheck) {
             importSelection.add(index);
         } else {
             importSelection.delete(index);
         }
+
+        importLastClickedVisibleIndex = visibleOrder;
         renderImportList();
     });
+
 
     document.getElementById('mb-btn-import-selected')?.addEventListener('click', async () => {
         toastr.info('正在导入选中楼层...', 'Memory Bridge');
