@@ -276,8 +276,12 @@ function setAvailableToolsToUI(tools) {
 }
 
 function getSelectedServerName(config, settings = getSettings()) {
+    const connection = getConnectionSettings(settings);
+    const explicitName = connection.selectedServerName?.trim();
+    if (explicitName) return explicitName;
+    if (config.serverName) return config.serverName;
     if (config.source === 'json') return config.label.replace(/\s+\(via mcp-router\)$/, '');
-    return getConnectionSettings(settings).selectedServerName?.trim() || 'memory-bridge-default';
+    return 'memory-bridge-default';
 }
 
 async function pluginFetch(path, body, method = 'POST') {
@@ -326,6 +330,7 @@ function resolveHttpConnectionConfig(settings) {
         url,
         headers,
         label: url,
+        usePluginRegistry: false,
     };
 }
 
@@ -341,6 +346,8 @@ function normalizeJsonHttpServer(serverName, serverConfig) {
         url,
         headers,
         label: serverName,
+        serverName,
+        usePluginRegistry: false,
     };
 }
 
@@ -617,7 +624,13 @@ function createPluginBackedClient(config) {
 }
 
 function createMcpClient(config) {
-    if (config.transport === 'streamable-http' || config.transport === 'command') {
+    if (config.transport === 'streamable-http') {
+        if (config.usePluginRegistry === false) {
+            return createStreamableHttpClient(config);
+        }
+        return createPluginBackedClient(config);
+    }
+    if (config.transport === 'command') {
         return createPluginBackedClient(config);
     }
     throw new Error(`不支持的 MCP transport: ${config.transport}`);
