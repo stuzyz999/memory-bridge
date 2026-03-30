@@ -330,7 +330,8 @@ function resolveHttpConnectionConfig(settings) {
         url,
         headers,
         label: url,
-        usePluginRegistry: false,
+        serverName: 'memory-bridge-default',
+        usePluginRegistry: true,
     };
 }
 
@@ -347,7 +348,7 @@ function normalizeJsonHttpServer(serverName, serverConfig) {
         headers,
         label: serverName,
         serverName,
-        usePluginRegistry: false,
+        usePluginRegistry: true,
     };
 }
 
@@ -625,7 +626,10 @@ function createPluginBackedClient(config) {
 
 function createMcpClient(config) {
     if (config.transport === 'streamable-http') {
-        return createStreamableHttpClient(config);
+        if (config.usePluginRegistry === false) {
+            return createStreamableHttpClient(config);
+        }
+        return createPluginBackedClient(config);
     }
     if (config.transport === 'command') {
         return createPluginBackedClient(config);
