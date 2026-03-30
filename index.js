@@ -103,7 +103,7 @@ const DEFAULT_SETTINGS = {
         parentUri: 'core://',
         titlePrefix: 'chat',
         disclosure: '当需要回想这段聊天内容时',
-        filterMode: 'recent',
+        filterMode: 'selected',
         limit: 20,
         rangeStart: '',
         rangeEnd: '',
@@ -1036,7 +1036,7 @@ function normalizeImportRangeValue(value) {
 function getImportFilterState(settings = getSettings()) {
     const importSettings = getImportSettings(settings);
     return {
-        filterMode: importSettings.filterMode === 'range' ? 'range' : 'recent',
+        filterMode: ['selected', 'recent', 'range', 'all'].includes(importSettings.filterMode) ? importSettings.filterMode : 'selected',
         limit: Math.max(1, parseInt(importSettings.limit, 10) || 20),
         rangeStart: normalizeImportRangeValue(importSettings.rangeStart),
         rangeEnd: normalizeImportRangeValue(importSettings.rangeEnd),
@@ -1049,6 +1049,11 @@ function getImportFilterState(settings = getSettings()) {
 function filterImportMessages(messages, settings = getSettings()) {
     const filters = getImportFilterState(settings);
     let visibleMessages = Array.isArray(messages) ? [...messages] : [];
+
+    if (filters.filterMode === 'selected') {
+        const selectedIndexes = new Set(importSelection);
+        visibleMessages = visibleMessages.filter(message => selectedIndexes.has(message.index));
+    }
 
     if (filters.nonEmptyOnly) {
         visibleMessages = visibleMessages.filter(message => message.text.trim());
@@ -1065,7 +1070,7 @@ function filterImportMessages(messages, settings = getSettings()) {
             if (end != null && message.floor > end) return false;
             return true;
         });
-    } else {
+    } else if (filters.filterMode === 'recent') {
         visibleMessages = visibleMessages.slice(Math.max(0, visibleMessages.length - filters.limit));
     }
 
@@ -1105,18 +1110,45 @@ function updateImportFilterModeUI() {
     document.querySelectorAll('[data-mb-import-filter-mode="range"]').forEach(section => {
         section.classList.toggle('mb-hidden', mode !== 'range');
     });
+    const bulkRangeRow = document.getElementById('mb-import-bulk-range')?.closest('.mb-row');
+    bulkRangeRow?.classList.toggle('mb-hidden', mode === 'range');
 }
 
 function updateImportSummaryCards({ visibleMessages = [], selectedMessages = [], settings = getSettings() } = {}) {
     const importSettings = getImportSettings(settings);
+    const filters = getImportFilterState(settings);
     const visibleCount = document.getElementById('mb-import-visible-count');
     const selectedCount = document.getElementById('mb-import-selected-count');
     const targetUri = document.getElementById('mb-import-target-uri');
     const titlePreview = document.getElementById('mb-import-title-preview');
     if (visibleCount) visibleCount.textContent = String(visibleMessages.length);
     if (selectedCount) selectedCount.textContent = String(selectedMessages.length);
-    if (targetUri) targetUri.textContent = importSettings.parentUri?.trim() || '（未填写）';
+    if (targetUri) {
+        if (filters.filterMode === 'selected') {
+            targetUri.textContent = '当前选区';
+        } else {
+            targetUri.textContent = importSettings.parentUri?.trim() || '（未填写）';
+        }
+    }
     if (titlePreview) titlePreview.textContent = importSettings.titlePrefix?.trim() || 'chat';
+}
+
+function setImportSelectionByRange(range, options = {}) {
+    const { keepView = true } = options;
+    const allMessages = getChatMessagesForImport().filter(message => message.text.trim());
+    importSelection = new Set(
+        allMessages
+            .filter(message => message.floor >= range.start && message.floor <= range.end)
+            .map(message => message.index),
+    );
+    importLastClickedVisibleIndex = null;
+    if (keepView) {
+        const filterModeSelect = document.getElementById('mb-import-filter-mode');
+        if (filterModeSelect) {
+            filterModeSelect.value = 'selected';
+        }
+        saveSettingsFromUI();
+    }
 }
 
 function parseImportBulkRange(value) {
@@ -1249,12 +1281,19 @@ function renderImportList() {
         return;
     }
 
+    const filters = getImportFilterState(settings);
     const firstVisibleFloor = visibleMessages[0]?.floor;
     const lastVisibleFloor = visibleMessages[visibleMessages.length - 1]?.floor;
     const rangeText = firstVisibleFloor && lastVisibleFloor
         ? `#${firstVisibleFloor}-${lastVisibleFloor}`
         : '无';
-    summary.textContent = `当前可见 ${visibleMessages.length} 条，已选 ${selectedMessages.length} 条，范围 ${rangeText}`;
+    const modeTextMap = {
+        selected: '当前选区',
+        recent: '最近楼层',
+        range: '楼层区间',
+        all: '全部楼层',
+    };
+    summary.textContent = `${modeTextMap[filters.filterMode] || '当前视图'}：可见 ${visibleMessages.length} 条，已选 ${selectedMessages.length} 条，范围 ${rangeText}`;
     container.innerHTML = visibleMessages.map((message) => {
         const checked = importSelection.has(message.index) ? 'checked' : '';
         const role = message.isUser ? '用户' : '助手';
@@ -1804,7 +1843,28 @@ function bindSettingsEvents() {
         renderImportList();
     });
 
-    ['mb-import-limit', 'mb-import-range-start', 'mb-import-range-end', 'mb-import-role-filter', 'mb-import-keyword', 'mb-import-non-empty-only', 'mb-import-parent-uri', 'mb-import-title-prefix']
+    document.getElementById('mb-import-range-end')?.addEventListener('change', () => {
+        const start = normalizeImportRangeValue(document.getElementById('mb-import-range-start')?.value);
+        const end = normalizeImportRangeValue(document.getElementById('mb-import-range-end')?.value);
+        if (start != null && end != null) {
+            setImportSelectionByRange(start <= end ? { start, end } : { start: end, end: start });
+        } else {
+            saveSettingsFromUI();
+        }
+        updateImportFilterModeUI();
+        renderImportList();
+    });
+
+    document.getElementById('mb-import-range-start')?.addEventListener('change', () => {
+        const endInput = document.getElementById('mb-import-range-end');
+        const start = normalizeImportRangeValue(document.getElementById('mb-import-range-start')?.value);
+        const end = normalizeImportRangeValue(endInput?.value);
+        if (start != null && end == null && endInput) {
+            endInput.value = String(start);
+        }
+    });
+
+    ['mb-import-limit', 'mb-import-role-filter', 'mb-import-keyword', 'mb-import-non-empty-only', 'mb-import-parent-uri', 'mb-import-title-prefix']
         .forEach((id) => {
             document.getElementById(id)?.addEventListener('change', () => {
                 saveSettingsFromUI();
@@ -2007,8 +2067,7 @@ function bindSettingsEvents() {
             toastr.warning('请输入有效区间，例如 20-40', 'Memory Bridge');
             return;
         }
-        const visibleMessages = getVisibleImportMessages();
-        applySelectionToVisibleMessages(visibleMessages, (message) => message.floor >= parsed.start && message.floor <= parsed.end);
+        setImportSelectionByRange(parsed);
         renderImportList();
     });
 

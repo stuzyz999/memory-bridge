@@ -161,10 +161,12 @@
         <div class="mb-section-title" style="margin-top:8px;">筛选候选集</div>
 
         <div class="mb-row">
-          <label for="mb-import-filter-mode">范围模式</label>
+          <label for="mb-import-filter-mode">视图模式</label>
           <select id="mb-import-filter-mode">
+            <option value="selected">仅看已选楼层</option>
             <option value="recent">最近 N 条</option>
             <option value="range">楼层区间</option>
+            <option value="all">全部楼层</option>
           </select>
         </div>
 
@@ -210,9 +212,9 @@
         </div>
 
         <div class="mb-row">
-          <label for="mb-import-bulk-range">区间选中</label>
+          <label for="mb-import-bulk-range">主选区</label>
           <input type="text" id="mb-import-bulk-range" placeholder="20-40 / 20~40" />
-          <button class="mb-btn" id="mb-btn-apply-import-range">应用</button>
+          <button class="mb-btn" id="mb-btn-apply-import-range">设为选区</button>
         </div>
 
         <div class="mb-btn-row">
