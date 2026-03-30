@@ -177,8 +177,37 @@
   user-select: none;
 }
 
-.mb-hint {
-  font-size: 0.78em;
-  color: #666;
-  margin-top: -4px;
+.mb-import-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--SmartThemeBorderColor, #333);
+  border-radius: 4px;
+  padding: 6px;
+  background: var(--SmartThemeBlurTintColor, #111);
+}
+
+.mb-import-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.mb-import-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.mb-import-item input {
+  margin-top: 2px;
+}
+
+.mb-import-item small {
+  color: var(--SmartThemeQuoteColor, #999);
+  white-space: pre-wrap;
+  word-break: break-word;
 }

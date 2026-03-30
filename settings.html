@@ -139,6 +139,124 @@
         </div>
       </div>
 
+      <!-- 历史导入 -->
+      <div class="mb-section" data-mb-mode="bridge">
+        <div class="mb-section-title">历史内容导入</div>
+
+        <div class="mb-row">
+          <label for="mb-import-parent-uri">父 URI</label>
+          <input type="text" id="mb-import-parent-uri" placeholder="core://" />
+        </div>
+
+        <div class="mb-row">
+          <label for="mb-import-title-prefix">标题前缀</label>
+          <input type="text" id="mb-import-title-prefix" placeholder="chat" />
+        </div>
+
+        <div class="mb-row mb-row-top">
+          <label for="mb-import-disclosure">Disclosure</label>
+          <textarea id="mb-import-disclosure" placeholder="当需要回想这段聊天内容时"></textarea>
+        </div>
+
+        <div class="mb-row">
+          <label for="mb-import-limit">显示条数</label>
+          <input type="number" id="mb-import-limit" min="1" max="200" value="20" style="max-width:90px;" />
+        </div>
+
+        <div class="mb-btn-row">
+          <button class="mb-btn" id="mb-btn-refresh-import-list">刷新楼层列表</button>
+          <button class="mb-btn" id="mb-btn-select-all-import">全选当前列表</button>
+          <button class="mb-btn" id="mb-btn-clear-import">清空选择</button>
+          <button class="mb-btn primary" id="mb-btn-import-selected">导入选中楼层</button>
+        </div>
+
+        <div class="mb-hint" id="mb-import-summary">0 条可导入</div>
+        <div id="mb-import-list" class="mb-import-list">
+          <div class="mb-hint">当前聊天没有可导入的正文楼层。</div>
+        </div>
+      </div>
+
+      <!-- LLM 配置 -->
+      <div class="mb-section" data-mb-mode="bridge">
+        <div class="mb-section-title">LLM 处理配置</div>
+
+        <div class="mb-row">
+          <label for="mb-llm-preset">LLM 预设</label>
+          <select id="mb-llm-preset"></select>
+        </div>
+
+        <div class="mb-btn-row">
+          <button class="mb-btn" id="mb-btn-add-llm-preset">新建预设</button>
+          <button class="mb-btn" id="mb-btn-copy-llm-preset">复制预设</button>
+          <button class="mb-btn" id="mb-btn-delete-llm-preset">删除预设</button>
+        </div>
+
+        <div class="mb-toggle-row">
+          <input type="checkbox" id="mb-llm-enabled" />
+          <label for="mb-llm-enabled">导入前启用 LLM 处理</label>
+        </div>
+
+        <div class="mb-row">
+          <label for="mb-llm-source">LLM 来源</label>
+          <select id="mb-llm-source">
+            <option value="tavern">Tavern 当前主模型</option>
+            <option value="custom">自定义 OpenAI 兼容 API</option>
+          </select>
+        </div>
+
+        <div class="mb-row" data-mb-llm-source="tavern">
+          <label for="mb-llm-tavern-profile">Tavern Profile</label>
+          <input type="text" id="mb-llm-tavern-profile" placeholder="暂预留，当前默认走主模型" />
+        </div>
+
+        <div class="mb-toggle-row" data-mb-llm-source="custom">
+          <input type="checkbox" id="mb-llm-use-main-api" />
+          <label for="mb-llm-use-main-api">优先走 ST 主 API 包装</label>
+        </div>
+
+        <div class="mb-row" data-mb-llm-source="custom">
+          <label for="mb-llm-api-url">API URL</label>
+          <input type="text" id="mb-llm-api-url" placeholder="https://example.com/v1/chat/completions" />
+        </div>
+
+        <div class="mb-row" data-mb-llm-source="custom">
+          <label for="mb-llm-api-key">API Key</label>
+          <input type="password" id="mb-llm-api-key" placeholder="Bearer Token" />
+        </div>
+
+        <div class="mb-row" data-mb-llm-source="custom">
+          <label for="mb-llm-model">模型</label>
+          <input type="text" id="mb-llm-model" placeholder="gpt-4.1 / claude-sonnet-4-6 / 自定义模型名" />
+        </div>
+
+        <div class="mb-row">
+          <label for="mb-llm-temperature">Temperature</label>
+          <input type="number" id="mb-llm-temperature" min="0" max="2" step="0.1" value="0.7" style="max-width:90px;" />
+        </div>
+
+        <div class="mb-row">
+          <label for="mb-llm-max-tokens">Max Tokens</label>
+          <input type="number" id="mb-llm-max-tokens" min="1" max="32000" value="2000" style="max-width:110px;" />
+        </div>
+
+        <div class="mb-row mb-row-top">
+          <label for="mb-llm-main-prompt">主系统提示词</label>
+          <textarea id="mb-llm-main-prompt"></textarea>
+        </div>
+
+        <div class="mb-row mb-row-top">
+          <label for="mb-llm-import-prompt">导入提示词</label>
+          <textarea id="mb-llm-import-prompt"></textarea>
+        </div>
+
+        <div class="mb-row mb-row-top">
+          <label for="mb-llm-recall-prompt">召回提示词</label>
+          <textarea id="mb-llm-recall-prompt"></textarea>
+        </div>
+
+        <div class="mb-hint">当前先将 LLM 处理接入历史导入；后续可复用到召回 query 改写与记忆整理。</div>
+      </div>
+
       <!-- 调试 -->
       <div class="mb-section">
         <div class="mb-section-title">调试</div>

@@ -23,6 +23,23 @@ const DEFAULT_MCP_CONFIG_JSON = JSON.stringify({
 
 // ─── 默认设置 ─────────────────────────────────────────────────────────────────
 
+function createDefaultLlmPreset(name = '默认预设') {
+    return {
+        id: `llm-preset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name,
+        enabled: false,
+        source: 'tavern',
+        tavernProfile: '',
+        apiUrl: '',
+        apiKey: '',
+        model: '',
+        temperature: 0.7,
+        maxTokens: 2000,
+        useMainApi: true,
+        prompts: JSON.parse(JSON.stringify(DEFAULT_SETTINGS.llm.prompts)),
+    };
+}
+
 const DEFAULT_SETTINGS = {
     workMode: 'bridge',
     connection: {
@@ -40,6 +57,70 @@ const DEFAULT_SETTINGS = {
         bootEnabled: false,
         bootUri: 'system://boot',
         testSnippet: '',
+    },
+    import: {
+        parentUri: 'core://',
+        titlePrefix: 'chat',
+        disclosure: '当需要回想这段聊天内容时',
+        limit: 20,
+    },
+    llm: {
+        selectedPresetId: 'default',
+        presets: [
+            {
+                id: 'default',
+                name: '默认预设',
+                enabled: false,
+                source: 'tavern',
+                tavernProfile: '',
+                apiUrl: '',
+                apiKey: '',
+                model: '',
+                temperature: 0.7,
+                maxTokens: 2000,
+                useMainApi: true,
+                prompts: [
+                    {
+                        id: 'mainPrompt',
+                        name: '主系统提示词',
+                        role: 'system',
+                        content: [
+                            '你是 Memory Bridge 的记忆整理助手。',
+                            '你的职责是将聊天内容整理为适合长期记忆写入与检索的文本。',
+                            '保持事实、关系、状态变化与关键表达，不编造，不扩写，不改变原意。',
+                            '输出应稳定、简洁、可复用，优先服务 MCP 记忆写入、召回查询改写与结果整理。',
+                        ].join('\n'),
+                    },
+                    {
+                        id: 'importPrompt',
+                        name: '历史导入处理指令',
+                        role: 'user',
+                        content: [
+                            '请将以下聊天楼层整理为适合写入长期记忆的内容。',
+                            '保留：角色、事实、关系、状态变化、设定、事件结论。',
+                            '删除：明显噪音、重复表述、无意义口头禅。',
+                            '输出纯文本，不要使用 Markdown 标题，不要解释你的步骤。',
+                            '',
+                            '原始楼层：',
+                            '{{input}}',
+                        ].join('\n'),
+                    },
+                    {
+                        id: 'recallPrompt',
+                        name: '召回查询处理指令',
+                        role: 'user',
+                        content: [
+                            '请将以下用户输入整理为适合全文检索的召回查询。',
+                            '提炼核心人物、地点、事件、关系与关键短语。',
+                            '输出单段纯文本查询，不要解释。',
+                            '',
+                            '用户输入：',
+                            '{{input}}',
+                        ].join('\n'),
+                    },
+                ],
+            },
+        ],
     },
     toolExposure: {
         enabled: true,
@@ -59,6 +140,7 @@ let lastInjectedContent = '';
 let lastErrorMessage = '';
 let lastBootStatusMessage = '';
 let registeredFunctionTools = [];
+let importSelection = new Set();
 
 // ─── 工具函数 ─────────────────────────────────────────────────────────────────
 
@@ -84,6 +166,12 @@ function migrateLegacySettings(settings) {
     }
     if (!settings.bridge || typeof settings.bridge !== 'object') {
         settings.bridge = {};
+    }
+    if (!settings.import || typeof settings.import !== 'object') {
+        settings.import = {};
+    }
+    if (!settings.llm || typeof settings.llm !== 'object') {
+        settings.llm = {};
     }
     if (!settings.toolExposure || typeof settings.toolExposure !== 'object') {
         settings.toolExposure = {};
@@ -129,6 +217,36 @@ function migrateLegacySettings(settings) {
     }
     if (!Object.hasOwn(settings.bridge, 'testSnippet')) {
         settings.bridge.testSnippet = DEFAULT_SETTINGS.bridge.testSnippet;
+    }
+
+    if (!Object.hasOwn(settings.import, 'parentUri')) {
+        settings.import.parentUri = DEFAULT_SETTINGS.import.parentUri;
+    }
+    if (!Object.hasOwn(settings.import, 'titlePrefix')) {
+        settings.import.titlePrefix = DEFAULT_SETTINGS.import.titlePrefix;
+    }
+    if (!Object.hasOwn(settings.import, 'disclosure')) {
+        settings.import.disclosure = DEFAULT_SETTINGS.import.disclosure;
+    }
+    if (!Object.hasOwn(settings.import, 'limit')) {
+        settings.import.limit = DEFAULT_SETTINGS.import.limit;
+    }
+
+    if (!Object.hasOwn(settings.llm, 'selectedPresetId')) {
+        settings.llm.selectedPresetId = 'default';
+    }
+    if (!Array.isArray(settings.llm.presets) || !settings.llm.presets.length) {
+        settings.llm.presets = [createDefaultLlmPreset('默认预设')];
+        settings.llm.presets[0].id = 'default';
+    }
+    settings.llm.presets = settings.llm.presets.map((preset, index) => ({
+        ...createDefaultLlmPreset(preset?.name || `预设 ${index + 1}`),
+        ...preset,
+        id: preset?.id || `llm-preset-${index + 1}`,
+        prompts: Array.isArray(preset?.prompts) ? preset.prompts : JSON.parse(JSON.stringify(DEFAULT_SETTINGS.llm.presets[0].prompts)),
+    }));
+    if (!settings.llm.presets.some(preset => preset.id === settings.llm.selectedPresetId)) {
+        settings.llm.selectedPresetId = settings.llm.presets[0].id;
     }
 
     if (!Object.hasOwn(settings.toolExposure, 'enabled')) {
@@ -242,6 +360,28 @@ function getBridgeSettings(settings = getSettings()) {
 
 function getToolExposureSettings(settings = getSettings()) {
     return settings.toolExposure ?? DEFAULT_SETTINGS.toolExposure;
+}
+
+function getImportSettings(settings = getSettings()) {
+    return settings.import ?? DEFAULT_SETTINGS.import;
+}
+
+function getLlmState(settings = getSettings()) {
+    return settings.llm ?? DEFAULT_SETTINGS.llm;
+}
+
+function getLlmPresets(settings = getSettings()) {
+    return getLlmState(settings).presets || [];
+}
+
+function getCurrentLlmPreset(settings = getSettings()) {
+    const llm = getLlmState(settings);
+    const presets = getLlmPresets(settings);
+    return presets.find(preset => preset.id === llm.selectedPresetId) || presets[0] || DEFAULT_SETTINGS.llm.presets[0];
+}
+
+function getPromptById(promptId, settings = getSettings()) {
+    return (getCurrentLlmPreset(settings).prompts || []).find(prompt => prompt?.id === promptId) || null;
 }
 
 function isToolSelected(toolName, settings = getSettings()) {
@@ -824,8 +964,231 @@ async function readMemory(uri) {
     }
 }
 
-// ─── 内容注入 ─────────────────────────────────────────────────────────────────
+async function createMemory(args) {
+    try {
+        if (!await ensureConnected()) {
+            throw new Error(lastErrorMessage || '无法连接到 MCP 服务');
+        }
+        log('创建记忆:', args?.title || '(untitled)');
+        return await mcpCallTool('create_memory', args);
+    } catch (err) {
+        logError('创建记忆失败:', err);
+        resetMcpClient();
+        setConnectionState('disconnected');
+        throw err;
+    }
+}
 
+function getChatMessagesForImport() {
+    const context = SillyTavern.getContext();
+    const chat = Array.isArray(context.chat) ? context.chat : [];
+    return chat
+        .map((message, index) => ({
+            index,
+            isUser: !!message?.is_user,
+            name: String(message?.name || (message?.is_user ? 'User' : 'Assistant') || ''),
+            text: String(message?.mes || ''),
+        }))
+        .filter(message => message.text.trim());
+}
+
+function getImportTitle(index, settings = getSettings()) {
+    const prefix = getImportSettings(settings).titlePrefix?.trim() || 'chat';
+    return `${prefix}-${String(index + 1).padStart(3, '0')}`;
+}
+
+function buildImportContent(message) {
+    const role = message.isUser ? 'user' : 'assistant';
+    return `[${role}] ${message.name}\n${message.text.trim()}`;
+}
+
+function fillPromptTemplate(template, variables = {}) {
+    let output = String(template || '');
+    for (const [key, value] of Object.entries(variables)) {
+        const pattern = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g');
+        output = output.replace(pattern, String(value ?? ''));
+    }
+    return output;
+}
+
+function buildPromptMessages(promptId, variables = {}, settings = getSettings()) {
+    const mainPrompt = getPromptById('mainPrompt', settings);
+    const taskPrompt = getPromptById(promptId, settings);
+    const messages = [];
+    if (mainPrompt?.content?.trim()) {
+        messages.push({ role: String(mainPrompt.role || 'system').toLowerCase(), content: mainPrompt.content });
+    }
+    if (taskPrompt?.content?.trim()) {
+        messages.push({ role: String(taskPrompt.role || 'user').toLowerCase(), content: fillPromptTemplate(taskPrompt.content, variables) });
+    }
+    return messages.filter(message => message.content?.trim());
+}
+
+async function callLlm(messages, options = {}) {
+    if (!Array.isArray(messages) || !messages.length) {
+        throw new Error('LLM messages 不能为空');
+    }
+
+    const settings = getSettings();
+    const llm = getCurrentLlmPreset(settings);
+    const context = SillyTavern.getContext();
+    const maxTokens = options.maxTokens || llm.maxTokens || 2000;
+
+    if (llm.source === 'tavern') {
+        if (typeof context.generateRaw === 'function') {
+            return await context.generateRaw({
+                ordered_prompts: messages,
+                max_chat_history: 0,
+                should_stream: false,
+                should_silence: true,
+            });
+        }
+        throw new Error('当前 ST 环境不支持 generateRaw');
+    }
+
+    if (!llm.apiUrl?.trim() || !llm.model?.trim()) {
+        throw new Error('自定义 LLM API 未配置完整');
+    }
+
+    const body = {
+        messages,
+        model: llm.model.trim(),
+        temperature: Number(llm.temperature) || 0.7,
+        max_tokens: maxTokens,
+        stream: false,
+        chat_completion_source: 'custom',
+        group_names: [],
+        include_reasoning: false,
+        reasoning_effort: 'medium',
+        enable_web_search: false,
+        request_images: false,
+        custom_prompt_post_processing: 'strict',
+        reverse_proxy: llm.apiUrl.trim(),
+        proxy_password: '',
+        custom_url: llm.apiUrl.trim(),
+        custom_include_headers: llm.apiKey?.trim() ? `Authorization: Bearer ${llm.apiKey.trim()}` : '',
+    };
+
+    const response = await fetch('/api/backends/chat-completions/generate', {
+        method: 'POST',
+        headers: {
+            ...getRequestHeaders(),
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+        throw new Error(`LLM 请求失败: HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data?.choices?.[0]?.message?.content || data?.content || '';
+}
+
+async function maybeProcessImportContent(message, settings = getSettings()) {
+    const llm = getCurrentLlmPreset(settings);
+    const rawContent = buildImportContent(message);
+    if (!llm.enabled) return rawContent;
+
+    const messages = buildPromptMessages('importPrompt', { input: rawContent }, settings);
+    const result = await callLlm(messages, { maxTokens: llm.maxTokens });
+    return String(result || '').trim() || rawContent;
+}
+
+function renderImportList() {
+    const container = document.getElementById('mb-import-list');
+    const summary = document.getElementById('mb-import-summary');
+    if (!container || !summary) return;
+
+    const settings = getSettings();
+    const limit = Math.max(1, parseInt(getImportSettings(settings).limit, 10) || 20);
+    const messages = getChatMessagesForImport();
+    const visibleMessages = messages.slice(Math.max(0, messages.length - limit));
+    const visibleIndexes = new Set(visibleMessages.map(message => message.index));
+
+    importSelection = new Set(Array.from(importSelection).filter(index => visibleIndexes.has(index)));
+
+    if (!visibleMessages.length) {
+        container.innerHTML = '<div class="mb-hint">当前聊天没有可导入的正文楼层。</div>';
+        summary.textContent = '0 条可导入';
+        return;
+    }
+
+    summary.textContent = `显示最近 ${visibleMessages.length} 条可导入楼层，已选 ${importSelection.size} 条`;
+    container.innerHTML = visibleMessages.map((message) => {
+        const checked = importSelection.has(message.index) ? 'checked' : '';
+        const role = message.isUser ? '用户' : '助手';
+        const title = getImportTitle(message.index, settings);
+        const preview = message.text.replace(/\s+/g, ' ').slice(0, 120);
+        const escapedName = message.name.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const escapedPreview = preview.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return `
+            <label class="mb-import-item">
+              <input type="checkbox" class="mb-import-checkbox" data-import-index="${message.index}" ${checked} />
+              <span>
+                <b>#${message.index + 1} · ${role} · ${title}</b><br>
+                <small>${escapedName}</small><br>
+                <small>${escapedPreview || '（空文本）'}</small>
+              </span>
+            </label>
+        `;
+    }).join('');
+}
+
+function collectSelectedImportMessages() {
+    const messages = getChatMessagesForImport();
+    const messageMap = new Map(messages.map(message => [message.index, message]));
+    return Array.from(importSelection)
+        .sort((left, right) => left - right)
+        .map(index => messageMap.get(index))
+        .filter(Boolean);
+}
+
+async function runSelectedImport() {
+    saveSettingsFromUI();
+    const settings = getSettings();
+    const importSettings = getImportSettings(settings);
+    const selectedMessages = collectSelectedImportMessages();
+    if (!selectedMessages.length) {
+        return { ok: false, message: '请先勾选要导入的楼层' };
+    }
+
+    const parentUri = importSettings.parentUri?.trim();
+    if (!parentUri) {
+        return { ok: false, message: '请先填写父 URI' };
+    }
+
+    let successCount = 0;
+    const failures = [];
+    for (const message of selectedMessages) {
+        const processedContent = await maybeProcessImportContent(message, settings);
+        const args = {
+            parent_uri: parentUri,
+            title: getImportTitle(message.index, settings),
+            content: processedContent,
+            priority: message.isUser ? 2 : 3,
+            disclosure: importSettings.disclosure?.trim() || '当需要回想这段聊天内容时',
+        };
+        try {
+            await createMemory(args);
+            successCount += 1;
+        } catch (error) {
+            failures.push(`#${message.index + 1}: ${getErrorMessage(error)}`);
+        }
+    }
+
+    if (!failures.length) {
+        return { ok: true, message: `成功导入 ${successCount} 条楼层` };
+    }
+
+    return {
+        ok: successCount > 0,
+        message: `成功 ${successCount} 条，失败 ${failures.length} 条\n${failures.join('\n')}`,
+    };
+}
+
+// ─── 内容注入 ─────────────────────────────────────────────────────────────────
 function buildInjectedMessage(userInput, memoryContent) {
     if (!memoryContent?.trim()) return userInput;
     const tag = getBridgeSettings().injectTag?.trim();
@@ -1028,12 +1391,69 @@ function updateConnectionModeUI() {
     jsonSection?.classList.toggle('mb-hidden', mode !== 'json');
 }
 
+function renderLlmPresetOptions() {
+    const select = document.getElementById('mb-llm-preset');
+    if (!select) return;
+    const settings = getSettings();
+    const llm = getLlmState(settings);
+    const presets = getLlmPresets(settings);
+    select.innerHTML = presets.map((preset) => {
+        const selected = preset.id === llm.selectedPresetId ? 'selected' : '';
+        return `<option value="${preset.id}" ${selected}>${String(preset.name || preset.id).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</option>`;
+    }).join('');
+}
+
+function syncCurrentLlmPresetFromUI(settings = getSettings()) {
+    const preset = getCurrentLlmPreset(settings);
+    if (!preset) return;
+    const get = (id) => document.getElementById(id);
+    preset.enabled = get('mb-llm-enabled')?.checked ?? false;
+    preset.source = get('mb-llm-source')?.value ?? 'tavern';
+    preset.tavernProfile = get('mb-llm-tavern-profile')?.value?.trim() ?? '';
+    preset.apiUrl = get('mb-llm-api-url')?.value?.trim() ?? '';
+    preset.apiKey = get('mb-llm-api-key')?.value ?? '';
+    preset.model = get('mb-llm-model')?.value?.trim() ?? '';
+    preset.temperature = parseFloat(get('mb-llm-temperature')?.value) || 0.7;
+    preset.maxTokens = parseInt(get('mb-llm-max-tokens')?.value) || 2000;
+    preset.useMainApi = get('mb-llm-use-main-api')?.checked ?? true;
+    preset.prompts = [
+        {
+            id: 'mainPrompt',
+            name: '主系统提示词',
+            role: 'system',
+            content: get('mb-llm-main-prompt')?.value ?? '',
+        },
+        {
+            id: 'importPrompt',
+            name: '历史导入处理指令',
+            role: 'user',
+            content: get('mb-llm-import-prompt')?.value ?? '',
+        },
+        {
+            id: 'recallPrompt',
+            name: '召回查询处理指令',
+            role: 'user',
+            content: get('mb-llm-recall-prompt')?.value ?? '',
+        },
+    ];
+}
+
 function updateWorkModeUI() {
     const workMode = document.getElementById('mb-work-mode')?.value ?? 'bridge';
     const bridgeSections = document.querySelectorAll('[data-mb-mode="bridge"]');
     const toolSections = document.querySelectorAll('[data-mb-mode="tool-exposed"]');
     bridgeSections.forEach(section => section.classList.toggle('mb-hidden', workMode !== 'bridge'));
     toolSections.forEach(section => section.classList.toggle('mb-hidden', workMode !== 'tool-exposed'));
+}
+
+function updateLlmSourceUI() {
+    const source = document.getElementById('mb-llm-source')?.value ?? 'tavern';
+    document.querySelectorAll('[data-mb-llm-source="tavern"]').forEach(section => {
+        section.classList.toggle('mb-hidden', source !== 'tavern');
+    });
+    document.querySelectorAll('[data-mb-llm-source="custom"]').forEach(section => {
+        section.classList.toggle('mb-hidden', source !== 'custom');
+    });
 }
 
 function loadSettingsToUI() {
@@ -1061,12 +1481,33 @@ function loadSettingsToUI() {
     set('mb-boot-enabled', bridge.bootEnabled);
     set('mb-boot-uri', bridge.bootUri);
     set('mb-test-snippet', bridge.testSnippet);
+    const importSettings = getImportSettings(s);
+    set('mb-import-parent-uri', importSettings.parentUri);
+    set('mb-import-title-prefix', importSettings.titlePrefix);
+    set('mb-import-disclosure', importSettings.disclosure);
+    set('mb-import-limit', importSettings.limit);
+    renderLlmPresetOptions();
+    const llm = getCurrentLlmPreset(s);
+    set('mb-llm-enabled', llm.enabled);
+    set('mb-llm-source', llm.source);
+    set('mb-llm-tavern-profile', llm.tavernProfile);
+    set('mb-llm-api-url', llm.apiUrl);
+    set('mb-llm-api-key', llm.apiKey);
+    set('mb-llm-model', llm.model);
+    set('mb-llm-temperature', llm.temperature);
+    set('mb-llm-max-tokens', llm.maxTokens);
+    set('mb-llm-use-main-api', llm.useMainApi);
+    set('mb-llm-main-prompt', getPromptById('mainPrompt', s)?.content || '');
+    set('mb-llm-import-prompt', getPromptById('importPrompt', s)?.content || '');
+    set('mb-llm-recall-prompt', getPromptById('recallPrompt', s)?.content || '');
     set('mb-debug', s.debug);
     updateConnectionModeUI();
     updateWorkModeUI();
+    updateLlmSourceUI();
     updateStatusUI(connectionState);
     updateLastInjectPreview(lastInjectedContent);
     updateBootStatusUI(lastBootStatusMessage);
+    renderImportList();
 }
 
 function saveSettingsFromUI() {
@@ -1086,6 +1527,12 @@ function saveSettingsFromUI() {
     s.bridge.bootEnabled = get('mb-boot-enabled')?.checked ?? false;
     s.bridge.bootUri = get('mb-boot-uri')?.value?.trim() ?? 'system://boot';
     s.bridge.testSnippet = get('mb-test-snippet')?.value ?? '';
+    s.import.parentUri = get('mb-import-parent-uri')?.value?.trim() ?? 'core://';
+    s.import.titlePrefix = get('mb-import-title-prefix')?.value?.trim() ?? 'chat';
+    s.import.disclosure = get('mb-import-disclosure')?.value?.trim() ?? '当需要回想这段聊天内容时';
+    s.import.limit = parseInt(get('mb-import-limit')?.value) || 20;
+    s.llm.selectedPresetId = get('mb-llm-preset')?.value ?? s.llm.selectedPresetId ?? 'default';
+    syncCurrentLlmPresetFromUI(s);
     s.toolExposure.enabled = get('mb-tool-exposure-enabled')?.checked ?? false;
     s.toolExposure.stealth = get('mb-tool-stealth')?.checked ?? true;
     s.toolExposure.selectedTools = Object.fromEntries(
@@ -1142,6 +1589,57 @@ function bindSettingsEvents() {
         unregisterAllFunctionTools();
         resetMcpClient();
         setConnectionState('disconnected');
+    });
+
+    document.getElementById('mb-llm-source')?.addEventListener('change', () => {
+        saveSettingsFromUI();
+        updateLlmSourceUI();
+    });
+
+    document.getElementById('mb-llm-preset')?.addEventListener('change', () => {
+        saveSettingsFromUI();
+        loadSettingsToUI();
+    });
+
+    document.getElementById('mb-btn-add-llm-preset')?.addEventListener('click', () => {
+        const settings = getSettings();
+        const presets = getLlmPresets(settings);
+        const preset = createDefaultLlmPreset(`预设 ${presets.length + 1}`);
+        presets.push(preset);
+        settings.llm.selectedPresetId = preset.id;
+        saveSettingsFromUI();
+        loadSettingsToUI();
+        toastr.success('已新建 LLM 预设', 'Memory Bridge');
+    });
+
+    document.getElementById('mb-btn-copy-llm-preset')?.addEventListener('click', () => {
+        const settings = getSettings();
+        syncCurrentLlmPresetFromUI(settings);
+        const current = getCurrentLlmPreset(settings);
+        const copy = {
+            ...JSON.parse(JSON.stringify(current)),
+            id: `llm-preset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name: `${current.name || '预设'} (副本)`,
+        };
+        settings.llm.presets.push(copy);
+        settings.llm.selectedPresetId = copy.id;
+        saveSettingsFromUI();
+        loadSettingsToUI();
+        toastr.success('已复制 LLM 预设', 'Memory Bridge');
+    });
+
+    document.getElementById('mb-btn-delete-llm-preset')?.addEventListener('click', () => {
+        const settings = getSettings();
+        const presets = getLlmPresets(settings);
+        if (presets.length <= 1) {
+            toastr.warning('至少保留一个 LLM 预设', 'Memory Bridge');
+            return;
+        }
+        settings.llm.presets = presets.filter(preset => preset.id !== settings.llm.selectedPresetId);
+        settings.llm.selectedPresetId = settings.llm.presets[0]?.id || 'default';
+        saveSettingsFromUI();
+        loadSettingsToUI();
+        toastr.success('已删除当前 LLM 预设', 'Memory Bridge');
     });
 
     document.getElementById('mb-btn-connect')?.addEventListener('click', async () => {
@@ -1216,6 +1714,44 @@ function bindSettingsEvents() {
         setConnectionState('disconnected');
         toastr.info('会话已清除', 'Memory Bridge');
     });
+
+    document.getElementById('mb-btn-refresh-import-list')?.addEventListener('click', () => {
+        saveSettingsFromUI();
+        renderImportList();
+        toastr.info('已刷新楼层列表', 'Memory Bridge');
+    });
+
+    document.getElementById('mb-btn-select-all-import')?.addEventListener('click', () => {
+        document.querySelectorAll('.mb-import-checkbox').forEach((el) => {
+            el.checked = true;
+            importSelection.add(Number(el.dataset.importIndex));
+        });
+        renderImportList();
+    });
+
+    document.getElementById('mb-btn-clear-import')?.addEventListener('click', () => {
+        importSelection.clear();
+        renderImportList();
+    });
+
+    document.getElementById('mb-import-list')?.addEventListener('change', (event) => {
+        const target = event.target;
+        if (!target?.classList?.contains('mb-import-checkbox')) return;
+        const index = Number(target.dataset.importIndex);
+        if (!Number.isFinite(index)) return;
+        if (target.checked) {
+            importSelection.add(index);
+        } else {
+            importSelection.delete(index);
+        }
+        renderImportList();
+    });
+
+    document.getElementById('mb-btn-import-selected')?.addEventListener('click', async () => {
+        toastr.info('正在导入选中楼层...', 'Memory Bridge');
+        const { ok, message } = await runSelectedImport();
+        toastr[ok ? 'success' : 'warning'](message, 'Memory Bridge');
+    });
 }
 
 // ─── 初始化 ───────────────────────────────────────────────────────────────────
@@ -1248,6 +1784,8 @@ jQuery(async () => {
     // 切换聊天时加载 Boot Memory
     eventSource.on(event_types.CHAT_CHANGED, async () => {
         resetBridgeRuntimeState();
+        importSelection.clear();
+        renderImportList();
         setLastBootStatus('正在加载 Boot Memory...');
         await loadBootMemory();
     });
