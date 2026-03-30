@@ -1510,8 +1510,13 @@ function loadSettingsToUI() {
     renderImportList();
 }
 
-function saveSettingsFromUI() {
+function persistSettings(settings) {
     const { extensionSettings, saveSettingsDebounced } = SillyTavern.getContext();
+    extensionSettings[EXT_NAME] = settings;
+    saveSettingsDebounced();
+}
+
+function saveSettingsFromUI() {
     const s = getSettings();
     const get = (id) => document.getElementById(id);
     s.workMode = get('mb-work-mode')?.value ?? 'bridge';
@@ -1539,8 +1544,7 @@ function saveSettingsFromUI() {
         Array.from(document.querySelectorAll('.mb-tool-checkbox')).map((el) => [el.dataset.toolName, el.checked]),
     );
     s.debug = get('mb-debug')?.checked ?? false;
-    extensionSettings[EXT_NAME] = s;
-    saveSettingsDebounced();
+    persistSettings(s);
 }
 
 async function runRecallPreview(query) {
@@ -1603,11 +1607,12 @@ function bindSettingsEvents() {
 
     document.getElementById('mb-btn-add-llm-preset')?.addEventListener('click', () => {
         const settings = getSettings();
+        syncCurrentLlmPresetFromUI(settings);
         const presets = getLlmPresets(settings);
         const preset = createDefaultLlmPreset(`预设 ${presets.length + 1}`);
         presets.push(preset);
         settings.llm.selectedPresetId = preset.id;
-        saveSettingsFromUI();
+        persistSettings(settings);
         loadSettingsToUI();
         toastr.success('已新建 LLM 预设', 'Memory Bridge');
     });
@@ -1623,13 +1628,14 @@ function bindSettingsEvents() {
         };
         settings.llm.presets.push(copy);
         settings.llm.selectedPresetId = copy.id;
-        saveSettingsFromUI();
+        persistSettings(settings);
         loadSettingsToUI();
         toastr.success('已复制 LLM 预设', 'Memory Bridge');
     });
 
     document.getElementById('mb-btn-delete-llm-preset')?.addEventListener('click', () => {
         const settings = getSettings();
+        syncCurrentLlmPresetFromUI(settings);
         const presets = getLlmPresets(settings);
         if (presets.length <= 1) {
             toastr.warning('至少保留一个 LLM 预设', 'Memory Bridge');
@@ -1637,7 +1643,7 @@ function bindSettingsEvents() {
         }
         settings.llm.presets = presets.filter(preset => preset.id !== settings.llm.selectedPresetId);
         settings.llm.selectedPresetId = settings.llm.presets[0]?.id || 'default';
-        saveSettingsFromUI();
+        persistSettings(settings);
         loadSettingsToUI();
         toastr.success('已删除当前 LLM 预设', 'Memory Bridge');
     });
