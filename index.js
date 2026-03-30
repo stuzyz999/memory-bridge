@@ -625,10 +625,7 @@ function createPluginBackedClient(config) {
 
 function createMcpClient(config) {
     if (config.transport === 'streamable-http') {
-        if (config.usePluginRegistry === false) {
-            return createStreamableHttpClient(config);
-        }
-        return createPluginBackedClient(config);
+        return createStreamableHttpClient(config);
     }
     if (config.transport === 'command') {
         return createPluginBackedClient(config);
