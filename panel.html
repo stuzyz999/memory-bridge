@@ -1,0 +1,279 @@
+<div id="memory-bridge-panel-root" class="mb-panel-root mb-hidden">
+  <div class="mb-overlay" data-mb-panel-close></div>
+  <div class="mb-panel-shell" role="dialog" aria-modal="true" aria-labelledby="mb-panel-title">
+    <div class="mb-panel-sidebar">
+      <div class="mb-panel-brand">
+        <div class="mb-panel-kicker">Memory Bridge</div>
+        <div class="mb-panel-title" id="mb-panel-title">记忆工作台</div>
+        <div class="mb-panel-subtitle" id="mb-panel-chat-label">当前聊天：未识别</div>
+      </div>
+      <div class="mb-panel-tabs" role="tablist" aria-label="Memory Bridge 面板标签页">
+        <button class="mb-panel-tab is-active" type="button" data-mb-tab="overview">总览</button>
+        <button class="mb-panel-tab" type="button" data-mb-tab="import">导入</button>
+        <button class="mb-panel-tab" type="button" data-mb-tab="recall">召回</button>
+        <button class="mb-panel-tab" type="button" data-mb-tab="config">配置</button>
+      </div>
+      <div class="mb-panel-actions">
+        <button class="mb-btn" type="button" id="mb-panel-refresh">刷新状态</button>
+        <button class="mb-btn" type="button" id="mb-panel-open-settings">定位设置抽屉</button>
+      </div>
+    </div>
+
+    <div class="mb-panel-main">
+      <div class="mb-panel-header">
+        <div>
+          <div class="mb-panel-heading">独立记忆工作台</div>
+          <div class="mb-panel-status-line" id="mb-panel-status-line">等待初始化...</div>
+        </div>
+        <button class="mb-panel-close" type="button" data-mb-panel-close aria-label="关闭面板">×</button>
+      </div>
+
+      <section class="mb-panel-section is-active" data-mb-tab-panel="overview">
+        <div class="mb-panel-grid mb-panel-grid-2">
+          <div class="mb-panel-card">
+            <div class="mb-panel-card-title">连接状态</div>
+            <div class="mb-panel-card-value" id="mb-panel-connection-state">未连接</div>
+            <div class="mb-panel-card-desc" id="mb-panel-error-text">暂无错误</div>
+          </div>
+          <div class="mb-panel-card">
+            <div class="mb-panel-card-title">Boot 状态</div>
+            <div class="mb-panel-card-value" id="mb-panel-boot-state">尚未加载</div>
+            <div class="mb-panel-card-desc" id="mb-panel-work-mode">当前模式：bridge</div>
+          </div>
+          <div class="mb-panel-card">
+            <div class="mb-panel-card-title">聊天绑定 URI</div>
+            <div class="mb-panel-card-value mb-break-all" id="mb-panel-parent-uri">core://rp/default</div>
+            <div class="mb-panel-card-desc" id="mb-panel-parent-uri-source">按当前聊天自动生成</div>
+          </div>
+          <div class="mb-panel-card">
+            <div class="mb-panel-card-title">最近注入预览</div>
+            <div class="mb-panel-card-value" id="mb-panel-last-inject-short">尚未注入</div>
+            <div class="mb-panel-card-desc">完整内容见召回页</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="mb-panel-section" data-mb-tab-panel="import">
+        <div class="mb-panel-subgrid">
+          <div class="mb-panel-card">
+            <div class="mb-panel-card-title">导入目标</div>
+            <div class="mb-panel-card-value mb-break-all" id="mb-panel-import-target-uri">core://rp/default</div>
+            <div class="mb-panel-card-desc" id="mb-panel-import-target-note">自动按聊天绑定；高级覆盖仍可在设置中填写</div>
+          </div>
+          <div class="mb-panel-card">
+            <div class="mb-panel-card-title">导入摘要</div>
+            <div class="mb-panel-card-value" id="mb-panel-import-counts">可见 0 / 已选 0</div>
+            <div class="mb-panel-card-desc" id="mb-panel-import-summary-copy">当前无可导入楼层</div>
+          </div>
+        </div>
+        <div class="mb-import-controls">
+          <div class="mb-row">
+            <label for="mb-import-filter-mode">过滤模式</label>
+            <select id="mb-import-filter-mode">
+              <option value="selected">勾选模式</option>
+              <option value="recent">最近N条</option>
+              <option value="range">区间</option>
+              <option value="all">全部</option>
+            </select>
+          </div>
+          <div class="mb-row" data-mb-import-filter-mode="recent">
+            <label for="mb-import-limit">最近条数</label>
+            <input id="mb-import-limit" type="number" min="1" value="20" />
+          </div>
+          <div class="mb-row" data-mb-import-filter-mode="range">
+            <label for="mb-import-range-start">起始楼层</label>
+            <input id="mb-import-range-start" type="number" min="1" />
+            <label for="mb-import-range-end">结束楼层</label>
+            <input id="mb-import-range-end" type="number" min="1" />
+          </div>
+          <div class="mb-row">
+            <label for="mb-import-keyword">关键词过滤</label>
+            <input id="mb-import-keyword" type="text" placeholder="留空不过滤" />
+          </div>
+          <div class="mb-row">
+            <label for="mb-import-role-filter">角色过滤</label>
+            <select id="mb-import-role-filter">
+              <option value="all">全部</option>
+              <option value="user">用户</option>
+              <option value="assistant">助手</option>
+            </select>
+            <label><input id="mb-import-nonempty" type="checkbox" checked /> 仅非空楼层</label>
+          </div>
+          <div class="mb-row">
+            <label for="mb-import-batch-size">分段合并（楼层数/条）</label>
+            <input id="mb-import-batch-size" type="number" min="1" max="50" value="1" />
+          </div>
+          <div class="mb-row">
+            <input id="mb-import-bulk-range" type="text" placeholder="20-40" />
+            <button class="mb-btn" type="button" id="mb-btn-apply-import-range">应用区间</button>
+            <button class="mb-btn" type="button" id="mb-btn-select-visible-user">选用户</button>
+            <button class="mb-btn" type="button" id="mb-btn-select-visible-assistant">选助手</button>
+          </div>
+        </div>
+        <div id="mb-import-list"></div>
+        <div id="mb-import-summary" class="mb-hint"></div>
+        <div class="mb-row">
+          <label for="mb-import-disclosure">Disclosure 预览</label>
+          <textarea id="mb-import-disclosure" rows="2" placeholder="（导入时自动生成）"></textarea>
+        </div>
+        <div class="mb-btn-row">
+          <button class="mb-btn primary" type="button" id="mb-btn-import-selected">导入选中楼层</button>
+        </div>
+      </section>
+
+      <section class="mb-panel-section" data-mb-tab-panel="recall">
+        <div class="mb-panel-grid mb-panel-grid-2">
+          <div class="mb-panel-card">
+            <div class="mb-panel-card-title">最近注入</div>
+            <pre class="mb-panel-pre" id="mb-panel-last-inject">（尚未注入）</pre>
+          </div>
+          <div class="mb-panel-card">
+            <div class="mb-panel-card-title">动态 disclosure 预览</div>
+            <pre class="mb-panel-pre" id="mb-panel-disclosure-preview">（尚未生成）</pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="mb-panel-section" data-mb-tab-panel="config">
+        <div class="mb-panel-card">
+          <div class="mb-panel-card-title">工作模式</div>
+          <div class="mb-panel-card-desc">在记忆召回模式与工具暴露模式之间切换。</div>
+          <div class="mb-row">
+            <label for="mb-work-mode">当前模式</label>
+            <select id="mb-work-mode">
+              <option value="bridge">Bridge</option>
+              <option value="tool-exposed">Tool Exposed</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mb-panel-card" data-mb-mode="bridge">
+          <div class="mb-panel-card-title">MCP 连接配置</div>
+          <div class="mb-panel-card-desc">配置记忆库 MCP 端点，支持 HTTP 与 JSON 两种来源。</div>
+          <div class="mb-row">
+            <label for="mb-connection-mode">连接模式</label>
+            <select id="mb-connection-mode">
+              <option value="http">HTTP</option>
+              <option value="json">JSON</option>
+            </select>
+          </div>
+          <div id="mb-http-config">
+            <div class="mb-row">
+              <label for="mb-server-url">MCP HTTP 地址</label>
+              <input id="mb-server-url" type="text" placeholder="http://localhost:8000/mcp" />
+            </div>
+            <div class="mb-row">
+              <label for="mb-token">Bearer Token</label>
+              <input id="mb-token" type="password" placeholder="可选" />
+            </div>
+          </div>
+          <div id="mb-json-config" class="mb-hidden">
+            <div class="mb-row">
+              <label for="mb-selected-server-name">Server 名称</label>
+              <input id="mb-selected-server-name" type="text" placeholder="留空则使用第一个 server" />
+            </div>
+            <div class="mb-row">
+              <label for="mb-mcp-config-json">MCP JSON 配置</label>
+            </div>
+            <textarea id="mb-mcp-config-json" rows="8" placeholder='{"mcpServers": {...}}'></textarea>
+          </div>
+        </div>
+
+        <div class="mb-panel-card" data-mb-mode="tool-exposed">
+          <div class="mb-panel-card-title">工具暴露</div>
+          <div class="mb-panel-card-desc">将 MCP 工具注册为 SillyTavern 可调用函数。</div>
+          <div class="mb-row">
+            <label><input id="mb-tool-exposure-enabled" type="checkbox" /> 启用工具暴露</label>
+            <label><input id="mb-tool-stealth" type="checkbox" /> 隐形注册</label>
+            <button class="mb-btn" type="button" id="mb-btn-refresh-tools">刷新工具列表</button>
+          </div>
+          <div class="mb-hint">切换到该模式后，优先连接 MCP 并点击刷新工具列表。</div>
+          <div id="mb-tool-list" class="mb-hint">暂无工具。先连接 MCP 后点击刷新工具列表。</div>
+        </div>
+
+        <div class="mb-panel-card">
+          <div class="mb-panel-card-title">LLM 配置</div>
+          <div class="mb-panel-card-desc">配置导入整理、召回查询与 disclosure 生成使用的模型。</div>
+          <div class="mb-row">
+            <label for="mb-llm-preset">当前预设</label>
+            <select id="mb-llm-preset"></select>
+            <label><input id="mb-llm-enabled" type="checkbox" /> 启用 LLM</label>
+          </div>
+          <div class="mb-row">
+            <label for="mb-llm-source">模型来源</label>
+            <select id="mb-llm-source">
+              <option value="tavern">Tavern 主模型</option>
+              <option value="custom">自定义 API</option>
+            </select>
+          </div>
+          <div class="mb-row" data-mb-llm-source="tavern">
+            <label for="mb-llm-tavern-profile">Tavern Profile</label>
+            <input id="mb-llm-tavern-profile" type="text" placeholder="可选" />
+            <label><input id="mb-llm-use-main-api" type="checkbox" checked /> 使用主 API</label>
+          </div>
+          <div data-mb-llm-source="custom" class="mb-hidden">
+            <div class="mb-row">
+              <label for="mb-llm-api-url">API URL</label>
+              <input id="mb-llm-api-url" type="text" placeholder="https://.../v1/chat/completions" />
+            </div>
+            <div class="mb-row">
+              <label for="mb-llm-api-key">API Key</label>
+              <input id="mb-llm-api-key" type="password" placeholder="sk-..." />
+            </div>
+          </div>
+          <div class="mb-row">
+            <label for="mb-llm-model">模型名</label>
+            <input id="mb-llm-model" type="text" placeholder="model name" />
+            <select id="mb-llm-model-list">
+              <option value="">（先拉取模型列表）</option>
+            </select>
+          </div>
+          <div class="mb-btn-row">
+            <button class="mb-btn" type="button" id="mb-btn-fetch-llm-models">拉取模型</button>
+            <button class="mb-btn" type="button" id="mb-btn-test-llm">测试连通性</button>
+          </div>
+          <div class="mb-row">
+            <label for="mb-llm-temperature">Temperature</label>
+            <input id="mb-llm-temperature" type="number" step="0.1" min="0" max="2" />
+            <label for="mb-llm-max-tokens">Max Tokens</label>
+            <input id="mb-llm-max-tokens" type="number" min="1" step="1" />
+          </div>
+          <div class="mb-row">
+            <label for="mb-llm-main-prompt">主系统提示词</label>
+          </div>
+          <textarea id="mb-llm-main-prompt" rows="5"></textarea>
+          <div class="mb-row">
+            <label for="mb-llm-import-prompt">导入提示词</label>
+          </div>
+          <textarea id="mb-llm-import-prompt" rows="6"></textarea>
+          <div class="mb-row">
+            <label for="mb-llm-disclosure-prompt">Disclosure 提示词</label>
+          </div>
+          <textarea id="mb-llm-disclosure-prompt" rows="6"></textarea>
+          <div class="mb-row">
+            <label for="mb-llm-recall-prompt">召回提示词</label>
+          </div>
+          <textarea id="mb-llm-recall-prompt" rows="5"></textarea>
+        </div>
+
+        <div class="mb-panel-card">
+          <div class="mb-panel-card-title">导入文本清洗</div>
+          <div class="mb-panel-card-desc">导入时自动剥除的 XML 标签名（每行一个或逗号分隔）。匹配开闭标签及其属性，不删除标签内容。</div>
+          <div class="mb-row">
+            <label for="mb-import-strip-tags">剥除标签列表</label>
+          </div>
+          <textarea id="mb-import-strip-tags" rows="4" placeholder="thinking&#10;UpdateVariable&#10;Analysis"></textarea>
+        </div>
+
+        <div class="mb-btn-row">
+          <button class="mb-btn primary" type="button" id="mb-panel-go-settings">打开设置抽屉</button>
+          <button class="mb-btn" type="button" id="mb-panel-test-recall">测试召回</button>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<button id="mb-floating-button" class="mb-floating-button mb-hidden" type="button" aria-label="打开 Memory Bridge 工作台" title="Memory Bridge 工作台">
+  <span>MB</span>
+</button>

@@ -23,37 +23,37 @@ const DEFAULT_MCP_CONFIG_JSON = JSON.stringify({
 
 // ─── 默认设置 ─────────────────────────────────────────────────────────────────
 
-const DEFAULT_LLM_PROMPTS = [
+const DEFAULT_LLM_PROMPT_TEMPLATES = [
     {
-        id: 'mainPrompt',
-        name: '主系统提示词',
-        role: 'system',
-        content: [
-            '你是 Memory Bridge 的记忆整理助手。',
-            '你的职责是将聊天内容整理为适合长期记忆写入与检索的文本。',
-            '保持事实、关系、状态变化与关键表达，不编造，不扩写，不改变原意。',
-            '输出应稳定、简洁、可复用，优先服务 MCP 记忆写入、召回查询改写与结果整理。',
+        id: 'import',
+        label: '历史导入关键词生成指令',
+        validator: 'keywords',
+        maxTokens: 200,
+        systemPrompt: [
+            '你是 nocturne_memory 的关键词提取助手。',
+            '你的职责是从聊天楼层中提取最有检索价值的专有名词和关键短语。',
+            '只输出关键词，不改写正文，不编造，不解释。',
         ].join('\n'),
-    },
-    {
-        id: 'importPrompt',
-        name: '历史导入处理指令',
-        role: 'user',
-        content: [
-            '请将以下聊天楼层整理为适合写入长期记忆的内容。',
-            '保留：角色、事实、关系、状态变化、设定、事件结论。',
-            '删除：明显噪音、重复表述、无意义口头禅。',
-            '输出纯文本，不要使用 Markdown 标题，不要解释你的步骤。',
+        userPromptTemplate: [
+            '请从以下聊天楼层中提取 3-8 个最有检索价值的关键词。',
+            '优先选取：人名、别名、地名、物品名、组织名、关系词、事件关键短语。',
+            '输出格式：只输出一行，用空格分隔各关键词，不要标题，不要解释，不要标点。',
             '',
-            '原始楼层：',
+            '楼层内容：',
             '{{input}}',
         ].join('\n'),
     },
     {
-        id: 'recallPrompt',
-        name: '召回查询处理指令',
-        role: 'user',
-        content: [
+        id: 'recall',
+        label: '召回查询处理指令',
+        validator: 'recall',
+        maxTokens: 300,
+        systemPrompt: [
+            '你是 nocturne_memory 的召回查询整理助手。',
+            '你的职责是把用户输入压缩为适合全文检索的检索查询。',
+            '输出必须服务于关键词命中、人物地点事件关系检索，不要解释。',
+        ].join('\n'),
+        userPromptTemplate: [
             '请将以下用户输入整理为适合全文检索的召回查询。',
             '提炼核心人物、地点、事件、关系与关键短语。',
             '输出单段纯文本查询，不要解释。',
@@ -62,6 +62,60 @@ const DEFAULT_LLM_PROMPTS = [
             '{{input}}',
         ].join('\n'),
     },
+    {
+        id: 'disclosure',
+        label: '导入 disclosure 生成指令',
+        validator: 'disclosure',
+        maxTokens: 200,
+        systemPrompt: [
+            '你是 nocturne_memory 的 disclosure 生成助手。',
+            '你的职责是为一条记忆生成稳定、简洁、可检索的召回条件。',
+            '输出必须是一句中文条件描述，服务于 trigger/disclosure 召回网络。',
+        ].join('\n'),
+        userPromptTemplate: [
+            '你要为一条即将写入 nocturne_memory 的记忆生成 disclosure。',
+            'disclosure 的作用，是描述“在什么情况下应该召回这条记忆”。',
+            '要求：',
+            '1. 只输出一句话，不要解释。',
+            '2. 聚焦人物、地点、事件、关系、状态变化、世界线条件。',
+            '3. 不要出现“这条记忆”或“应该召回”这类元话语。',
+            '4. 长度尽量控制在 18 到 48 个字。',
+            '',
+            '聊天绑定：{{chatBinding}}',
+            '角色信息：{{characterInfo}}',
+            '最近上下文：',
+            '{{recentContext}}',
+            '',
+            '世界书摘要：',
+            '{{worldbookSummary}}',
+            '',
+            '当前导入楼层：',
+            '{{input}}',
+        ].join('\n'),
+    },
+];
+
+const DEFAULT_LLM_PROMPTS = [
+    {
+        id: 'mainPrompt',
+        name: '主系统提示词',
+        role: 'system',
+        content: [
+            '你是 nocturne_memory 的记忆整理助手。',
+            '你的职责是将聊天内容整理为适合长期记忆写入与检索的文本。',
+            '保持事实、关系、状态变化与关键表达，不编造，不扩写，不改变原意。',
+            '输出应稳定、简洁、可复用，优先服务 nocturne_memory 的 MCP 记忆写入、召回查询改写与结果整理。',
+        ].join('\n'),
+    },
+    ...DEFAULT_LLM_PROMPT_TEMPLATES.map((template) => ({
+        id: `${template.id}Prompt`,
+        name: template.label,
+        role: 'user',
+        content: template.userPromptTemplate,
+        systemPrompt: template.systemPrompt,
+        validator: template.validator,
+        maxTokens: template.maxTokens,
+    })),
 ];
 
 function createDefaultLlmPreset(name = '默认预设') {
@@ -83,6 +137,13 @@ function createDefaultLlmPreset(name = '默认预设') {
 
 const DEFAULT_SETTINGS = {
     workMode: 'bridge',
+    ui: {
+        activeTab: 'overview',
+        fabPosition: {
+            x: 0.92,
+            y: 0.88,
+        },
+    },
     connection: {
         mode: 'http',
         serverUrl: 'http://localhost:8000/mcp',
@@ -102,7 +163,7 @@ const DEFAULT_SETTINGS = {
     import: {
         parentUri: 'core://',
         titlePrefix: 'chat',
-        disclosure: '当需要回想这段聊天内容时',
+        disclosure: '',
         filterMode: 'selected',
         limit: 20,
         rangeStart: '',
@@ -110,6 +171,17 @@ const DEFAULT_SETTINGS = {
         roleFilter: 'all',
         keyword: '',
         nonEmptyOnly: true,
+        batchSize: 1,
+        stripTagPatterns: [
+            'thinking',
+            'UpdateVariable',
+            'StatusPlaceHolderImpl',
+            'Analysis',
+            'JSONPatch',
+            'content',
+            'time',
+            'recap',
+        ],
     },
     llm: {
         selectedPresetId: 'default',
@@ -150,6 +222,14 @@ let lastBootStatusMessage = '';
 let registeredFunctionTools = [];
 let importSelection = new Set();
 let importLastClickedVisibleIndex = null;
+let panelRoot = null;
+let panelFab = null;
+let panelContainer = null;
+let panelNavButton = null;
+let currentPanelTab = 'overview';
+let currentChatBindingState = createEmptyChatBindingState();
+let lastGeneratedDisclosurePreview = '';
+let fabDragState = null;
 
 // ─── 工具函数 ─────────────────────────────────────────────────────────────────
 
@@ -173,6 +253,9 @@ function migrateLegacySettings(settings) {
     if (!settings.connection || typeof settings.connection !== 'object') {
         settings.connection = {};
     }
+    if (!settings.ui || typeof settings.ui !== 'object') {
+        settings.ui = {};
+    }
     if (!settings.bridge || typeof settings.bridge !== 'object') {
         settings.bridge = {};
     }
@@ -188,6 +271,19 @@ function migrateLegacySettings(settings) {
 
     if (!settings.workMode) {
         settings.workMode = 'bridge';
+    }
+
+    if (!Object.hasOwn(settings.ui, 'activeTab')) {
+        settings.ui.activeTab = DEFAULT_SETTINGS.ui.activeTab;
+    }
+    if (!settings.ui.fabPosition || typeof settings.ui.fabPosition !== 'object') {
+        settings.ui.fabPosition = JSON.parse(JSON.stringify(DEFAULT_SETTINGS.ui.fabPosition));
+    }
+    if (!Object.hasOwn(settings.ui.fabPosition, 'x')) {
+        settings.ui.fabPosition.x = DEFAULT_SETTINGS.ui.fabPosition.x;
+    }
+    if (!Object.hasOwn(settings.ui.fabPosition, 'y')) {
+        settings.ui.fabPosition.y = DEFAULT_SETTINGS.ui.fabPosition.y;
     }
 
     if (!Object.hasOwn(settings.connection, 'mode')) {
@@ -270,7 +366,11 @@ function migrateLegacySettings(settings) {
         ...createDefaultLlmPreset(preset?.name || `预设 ${index + 1}`),
         ...preset,
         id: preset?.id || `llm-preset-${index + 1}`,
-        prompts: Array.isArray(preset?.prompts) ? preset.prompts : JSON.parse(JSON.stringify(DEFAULT_LLM_PROMPTS)),
+        prompts: (() => {
+            const existingPrompts = Array.isArray(preset?.prompts) ? preset.prompts : [];
+            const existingMap = new Map(existingPrompts.filter(prompt => prompt?.id).map(prompt => [prompt.id, prompt]));
+            return DEFAULT_LLM_PROMPTS.map(prompt => ({ ...prompt, ...(existingMap.get(prompt.id) || {}) }));
+        })(),
     }));
     if (!settings.llm.presets.some(preset => preset.id === settings.llm.selectedPresetId)) {
         settings.llm.selectedPresetId = settings.llm.presets[0].id;
@@ -369,6 +469,183 @@ function getRequestHeaders(options = {}) {
     };
 }
 
+function createEmptyChatBindingState() {
+    return {
+        rawChatId: '',
+        bindingSlug: 'default',
+        parentUri: 'core://rp/default',
+        label: '未识别聊天',
+        source: 'fallback',
+        characterInfo: '未知角色',
+    };
+}
+
+function slugifyChatBinding(value) {
+    const normalized = String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[\\/]+/g, '-')
+        .replace(/[^a-z0-9._-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^[-._]+|[-._]+$/g, '');
+    return normalized || 'default';
+}
+
+function resolveCharacterInfo(context = SillyTavern.getContext()) {
+    const parts = [
+        context?.name2,
+        context?.characterName,
+        context?.groupId ? `group:${context.groupId}` : '',
+        context?.characterId != null ? `char:${context.characterId}` : '',
+    ].map(value => String(value || '').trim()).filter(Boolean);
+    return parts.join(' / ') || '未知角色';
+}
+
+function resolveCurrentChatBinding(context = SillyTavern.getContext(), explicitChatId = '') {
+    const chatIdCandidates = [
+        explicitChatId,
+        context?.chatId,
+        context?.chat?.chat_id,
+        context?.chatMetadata?.chat_id,
+        context?.chatMetadata?.chatId,
+        context?.chatMetadata?.file_name,
+        context?.chatMetadata?.name,
+    ];
+    const rawChatId = chatIdCandidates
+        .map(value => String(value || '').trim())
+        .find(value => value && value !== 'null');
+    const bindingSlug = slugifyChatBinding(rawChatId || 'default');
+    const label = rawChatId || '未识别聊天';
+    return {
+        rawChatId: rawChatId || '',
+        bindingSlug,
+        parentUri: `core://rp/${bindingSlug}`,
+        label,
+        source: rawChatId ? 'chat' : 'fallback',
+        characterInfo: resolveCharacterInfo(context),
+    };
+}
+
+function buildChatBoundParentUri(settings = getSettings()) {
+    const overrideUri = getImportSettings(settings).parentUri?.trim();
+    if (overrideUri) return overrideUri;
+    return currentChatBindingState.parentUri || 'core://rp/default';
+}
+
+function getEffectiveImportTargetLabel(settings = getSettings()) {
+    const overrideUri = getImportSettings(settings).parentUri?.trim();
+    return overrideUri ? `${overrideUri}（高级覆盖）` : (currentChatBindingState.parentUri || 'core://rp/default');
+}
+
+function refreshCurrentChatBinding(explicitChatId = '') {
+    currentChatBindingState = resolveCurrentChatBinding(SillyTavern.getContext(), explicitChatId);
+    return currentChatBindingState;
+}
+
+function buildImportContent(message) {
+    const roleLabel = message.isUser ? '用户' : '助手';
+    return [
+        `楼层：#${message.floor}`,
+        `角色：${roleLabel}`,
+        `名称：${String(message.name || '').trim() || roleLabel}`,
+        '正文：',
+        String(message.text || '').trim(),
+    ].join('\n');
+}
+
+function normalizeImportSourceText(text, settings) {
+    const imp = getImportSettings(settings || getSettings());
+    const tagList = (imp.stripTagPatterns || []).filter(Boolean);
+    const tagPattern = tagList.length
+        ? new RegExp('<(?:' + tagList.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b[^>]*>[\\s\\S]*?<\/(?:' + tagList.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')>', 'gi')
+        : null;
+    return String(text || '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\[Start a new chat\]/gi, ' ')
+        .replace(tagPattern || /(?:)/g, tagPattern ? ' ' : '')
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/^\s*\[metacognition\]\s*$/gim, ' ')
+        .replace(/^\s*<details><summary>.*?<\/summary>\s*$/gim, ' ')
+        .replace(/^\s*<\/details>\s*$/gim, ' ')
+        .replace(/^\s*[-*]\s*(确认输出语言|必须使用|只写|不写|之前发生了什么|剧情进展到哪里|当前时间|地点|人物关系|角色状态|深度分析|世界如何运转|角色台词与旁白叙事|角色知道什么|当前使用什么文风|上一条内容最后停在哪里|如何自然过渡|是否重复|检查Mingyue输入|当前是否适合推进剧情|结尾是否升华|检查<echo>|角色运行引擎|角色理解|性格融合|场景压力识别|情绪阈值管理|防劣化自检|检查其他细节|小总结准备).*$/gim, ' ')
+        .replace(/^\s*楼层：#\d+\s*$/gim, ' ')
+        .replace(/^\s*角色：.*$/gim, ' ')
+        .replace(/^\s*名称：.*$/gim, ' ')
+        .replace(/^\s*正文：\s*$/gim, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function isImportContentMeaningful(text) {
+    const normalized = normalizeImportSourceText(text);
+    if (!normalized) return false;
+    if (normalized.length < 8) return false;
+    if (/^(收到|你好|您好|我是\s*Memory\s*Bridge)/i.test(normalized)) return false;
+    return /[\u4e00-\u9fa5A-Za-z0-9]/.test(normalized);
+}
+
+function buildImportFallbackContent(message) {
+    return normalizeImportSourceText(message?.text || '');
+}
+
+function buildRecentChatContext(limit = 6) {
+    const messages = getChatMessagesForImport()
+        .filter(message => message.text.trim())
+        .slice(-Math.max(1, limit));
+    if (!messages.length) return '（无最近上下文）';
+    return messages.map((message) => {
+        const role = message.isUser ? '用户' : '助手';
+        const preview = message.text.replace(/\s+/g, ' ').trim().slice(0, 120);
+        return `#${message.floor} ${role}/${message.name || role}: ${preview}`;
+    }).join('\n');
+}
+
+function extractWorldbookSummary(context = SillyTavern.getContext()) {
+    const candidates = [
+        context?.chatMetadata?.worldbook,
+        context?.chatMetadata?.worldbook_name,
+        context?.chatMetadata?.lorebook,
+        Array.isArray(context?.chatMetadata?.worldbookNames) ? context.chatMetadata.worldbookNames.join(', ') : '',
+    ].map(value => String(value || '').trim()).filter(Boolean);
+    return candidates.join(' / ') || '（当前未检测到世界书信息）';
+}
+
+function buildDisclosureInputContext(message, settings = getSettings()) {
+    const chatBinding = refreshCurrentChatBinding();
+    return {
+        input: buildImportContent(message),
+        chatBinding: `${chatBinding.label} -> ${chatBinding.parentUri}`,
+        characterInfo: chatBinding.characterInfo,
+        recentContext: buildRecentChatContext(),
+        worldbookSummary: extractWorldbookSummary(),
+    };
+}
+
+function buildDisclosureFallback(message) {
+    const roleText = message.isUser ? '用户' : '角色回复';
+    const name = String(message.name || '').trim();
+    const namedRole = name ? `${roleText}“${name}”` : roleText;
+    const bindingLabel = currentChatBindingState.label || '当前聊天';
+    return `当${bindingLabel}中再次涉及${namedRole}相关人物、场景、关系变化或关键事件时`;
+}
+
+async function generateDisclosure(message, settings = getSettings()) {
+    const contextVars = buildDisclosureInputContext(message, settings);
+    const execution = await executeLlmTask('disclosure', contextVars, {
+        settings,
+        fallback: () => buildDisclosureFallback(message),
+    }, settings);
+    return execution.ok ? execution.content : buildDisclosureFallback(message);
+}
+
+function setDisclosurePreview(value) {
+    lastGeneratedDisclosurePreview = String(value || '').trim();
+    const textarea = document.getElementById('mb-import-disclosure');
+    if (textarea) textarea.value = lastGeneratedDisclosurePreview;
+    const panelPreview = document.getElementById('mb-panel-disclosure-preview');
+    if (panelPreview) panelPreview.textContent = lastGeneratedDisclosurePreview || '（尚未生成）';
+}
+
 function isBridgeMode(settings = getSettings()) {
     return settings.workMode !== 'tool-exposed';
 }
@@ -395,6 +672,10 @@ function getImportSettings(settings = getSettings()) {
 
 function getLlmState(settings = getSettings()) {
     return settings.llm ?? DEFAULT_SETTINGS.llm;
+}
+
+function getUiSettings(settings = getSettings()) {
+    return settings.ui ?? DEFAULT_SETTINGS.ui;
 }
 
 function getLlmPresets(settings = getSettings()) {
@@ -436,7 +717,7 @@ function setAvailableToolsToUI(tools) {
         return `
             <label class="mb-tool-item">
               <input type="checkbox" class="mb-tool-checkbox" data-tool-name="${escapedName}" ${checked} />
-              <span><b>${toolName}</b><br><small>${description || '无描述'}</small></span>
+              <span><b>${escapeHtml(toolName)}</b><br><small>${description || '无描述'}</small></span>
             </label>
         `;
     }).join('');
@@ -950,6 +1231,16 @@ function setConnectionState(state) {
 
 // ─── 记忆召回 ─────────────────────────────────────────────────────────────────
 
+async function rewriteRecallQuery(input, settings = getSettings()) {
+    const normalizedInput = String(input || '').trim();
+    if (!normalizedInput) return '';
+    const execution = await executeLlmTask('recall', { input: normalizedInput }, {
+        settings,
+        fallback: () => buildFallbackRecallQuery(normalizedInput),
+    }, settings);
+    return execution.ok ? execution.content : buildFallbackRecallQuery(normalizedInput);
+}
+
 async function recallMemory(query) {
     const settings = getSettings();
     const bridge = getBridgeSettings(settings);
@@ -958,7 +1249,10 @@ async function recallMemory(query) {
             logError('无法连接到 MCP 服务，跳过记忆召回');
             return '';
         }
-        const args = { query: query.slice(0, 500), limit: bridge.recallLimit };
+        const rewrittenQuery = await rewriteRecallQuery(query, settings);
+        const effectiveQuery = String(rewrittenQuery || query || '').slice(0, 500).trim();
+        if (!effectiveQuery) return '';
+        const args = { query: effectiveQuery, limit: bridge.recallLimit };
         if (bridge.domain) args.domain = bridge.domain;
         log('召回记忆, query:', args.query);
         const result = await mcpCallTool('search_memory', args);
@@ -1014,15 +1308,31 @@ function getChatMessagesForImport() {
     }));
 }
 
+
 function getImportTitle(index, settings = getSettings()) {
     const prefix = getImportSettings(settings).titlePrefix?.trim() || 'chat';
     return `${prefix}-${String(index + 1).padStart(3, '0')}`;
 }
 
-function buildImportContent(message) {
-    const role = message.isUser ? 'user' : 'assistant';
-    return `[${role}] ${message.name}\n${message.text.trim()}`;
+function extractImportKeywords(content) {
+    const text = String(content || '').trim();
+    if (!text) return [];
+    return Array.from(new Set(
+        text
+            .split(/[\s,，、;；|/]+/)
+            .map(keyword => keyword.trim())
+            .filter(keyword => keyword.length >= 2)
+            .slice(0, 8),
+    ));
 }
+
+async function manageMemoryTriggers(uri, add = [], remove = []) {
+    const payload = { uri };
+    if (Array.isArray(add) && add.length) payload.add = add;
+    if (Array.isArray(remove) && remove.length) payload.remove = remove;
+    return await mcpCallTool('manage_triggers', payload);
+}
+
 
 function escapeHtml(value) {
     return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -1036,7 +1346,7 @@ function normalizeImportRangeValue(value) {
 function getImportFilterState(settings = getSettings()) {
     const importSettings = getImportSettings(settings);
     return {
-        filterMode: ['selected', 'recent', 'range', 'all'].includes(importSettings.filterMode) ? importSettings.filterMode : 'selected',
+        filterMode: ['selected', 'recent', 'range', 'all'].includes(importSettings.filterMode) ? importSettings.filterMode : 'recent',
         limit: Math.max(1, parseInt(importSettings.limit, 10) || 20),
         rangeStart: normalizeImportRangeValue(importSettings.rangeStart),
         rangeEnd: normalizeImportRangeValue(importSettings.rangeEnd),
@@ -1117,20 +1427,22 @@ function updateImportFilterModeUI() {
 function updateImportSummaryCards({ visibleMessages = [], selectedMessages = [], settings = getSettings() } = {}) {
     const importSettings = getImportSettings(settings);
     const filters = getImportFilterState(settings);
-    const visibleCount = document.getElementById('mb-import-visible-count');
-    const selectedCount = document.getElementById('mb-import-selected-count');
     const targetUri = document.getElementById('mb-import-target-uri');
     const titlePreview = document.getElementById('mb-import-title-preview');
-    if (visibleCount) visibleCount.textContent = String(visibleMessages.length);
-    if (selectedCount) selectedCount.textContent = String(selectedMessages.length);
+    const effectiveTargetLabel = getEffectiveImportTargetLabel(settings);
     if (targetUri) {
         if (filters.filterMode === 'selected') {
             targetUri.textContent = '当前选区';
         } else {
-            targetUri.textContent = importSettings.parentUri?.trim() || '（未填写）';
+            targetUri.textContent = effectiveTargetLabel;
         }
     }
     if (titlePreview) titlePreview.textContent = importSettings.titlePrefix?.trim() || 'chat';
+
+    const panelUri = document.getElementById('mb-panel-import-target-uri');
+    if (panelUri) panelUri.textContent = effectiveTargetLabel;
+    const panelCounts = document.getElementById('mb-panel-import-counts');
+    if (panelCounts) panelCounts.textContent = `可见 ${visibleMessages.length} / 已选 ${selectedMessages.length}`;
 }
 
 function setImportSelectionByRange(range, options = {}) {
@@ -1171,17 +1483,126 @@ function fillPromptTemplate(template, variables = {}) {
     return output;
 }
 
+function getPromptTemplateDefinition(taskId) {
+    return DEFAULT_LLM_PROMPT_TEMPLATES.find(template => template.id === taskId) || null;
+}
+
+function getTaskPrompt(taskId, settings = getSettings()) {
+    return getPromptById(`${taskId}Prompt`, settings);
+}
+
 function buildPromptMessages(promptId, variables = {}, settings = getSettings()) {
     const mainPrompt = getPromptById('mainPrompt', settings);
     const taskPrompt = getPromptById(promptId, settings);
     const messages = [];
+    const taskSystemPrompt = taskPrompt?.systemPrompt || '';
     if (mainPrompt?.content?.trim()) {
         messages.push({ role: String(mainPrompt.role || 'system').toLowerCase(), content: mainPrompt.content });
+    }
+    if (taskSystemPrompt.trim()) {
+        messages.push({ role: 'system', content: fillPromptTemplate(taskSystemPrompt, variables) });
     }
     if (taskPrompt?.content?.trim()) {
         messages.push({ role: String(taskPrompt.role || 'user').toLowerCase(), content: fillPromptTemplate(taskPrompt.content, variables) });
     }
     return messages.filter(message => message.content?.trim());
+}
+
+function normalizeLlmText(value) {
+    return String(value || '').replace(/\r\n/g, '\n').trim();
+}
+
+function isGreetingLikeText(text) {
+    const normalized = normalizeLlmText(text);
+    if (!normalized) return false;
+    return /^(收到|你好|您好|嗨|hello|hi|我是\s*(?:memory\s*bridge|nocturne_memory))/i.test(normalized);
+}
+
+function classifyLlmError(error) {
+    const message = getErrorMessage(error).toLowerCase();
+    if (!message) return 'unknown';
+    if (/http\s+40[134]/.test(message) || message.includes('unauthorized') || message.includes('forbidden') || message.includes('unprocessable')) return 'client_error';
+    if (message.includes('429') || message.includes('rate limit') || message.includes('resource_exhausted') || message.includes('quota')) return 'rate_limit';
+    if (message.includes('timeout')) return 'timeout';
+    if (message.includes('network') || message.includes('failed to fetch')) return 'network';
+    if (/http\s+5\d\d/.test(message)) return 'http_retryable';
+    return 'unknown';
+}
+
+function shouldRetryLlmFailure(failureType) {
+    return ['rate_limit', 'timeout', 'network', 'http_retryable'].includes(failureType);
+}
+
+function getTaskMaxTokens(taskId, options = {}, settings = getSettings()) {
+    if (Number.isFinite(Number(options.maxTokens)) && Number(options.maxTokens) > 0) {
+        return Number(options.maxTokens);
+    }
+    const taskPrompt = getTaskPrompt(taskId, settings);
+    if (Number.isFinite(Number(taskPrompt?.maxTokens)) && Number(taskPrompt.maxTokens) > 0) {
+        return Number(taskPrompt.maxTokens);
+    }
+    const definition = getPromptTemplateDefinition(taskId);
+    if (Number.isFinite(Number(definition?.maxTokens)) && Number(definition.maxTokens) > 0) {
+        return Number(definition.maxTokens);
+    }
+    return Number(getCurrentLlmPreset(settings)?.maxTokens) || 2000;
+}
+
+function validateImportCandidate(text) {
+    const normalized = normalizeImportSourceText(text);
+    if (!normalized) return { ok: false, failureType: 'empty', reason: '空输出' };
+    if (normalized.length < 20) return { ok: false, failureType: 'validation_failed', reason: '内容过短' };
+    if (isGreetingLikeText(normalized)) return { ok: false, failureType: 'junk', reason: '寒暄输出' };
+    if (!/[\u4e00-\u9fa5A-Za-z0-9]/.test(normalized)) {
+        return { ok: false, failureType: 'validation_failed', reason: '缺少有效字符' };
+    }
+    if (/(?:\[Start a new chat\]|<StatusPlaceHolderImpl|<UpdateVariable|<JSONPatch|<time>|<content>|<recap>)/i.test(normalized)) {
+        return { ok: false, failureType: 'validation_failed', reason: '仍含控制块残留' };
+    }
+    return { ok: true, content: normalized };
+}
+
+function validateDisclosureCandidate(text) {
+    const normalized = normalizeLlmText(text).replace(/\n+/g, ' ');
+    if (!normalized) return { ok: false, failureType: 'empty', reason: '空输出' };
+    if (isGreetingLikeText(normalized)) return { ok: false, failureType: 'junk', reason: '寒暄输出' };
+    if (normalized.length < 8 || normalized.length > 80) {
+        return { ok: false, failureType: 'validation_failed', reason: '长度不符合 disclosure 要求' };
+    }
+    if (/这条记忆|应该召回|以下是|disclosure/i.test(normalized)) {
+        return { ok: false, failureType: 'validation_failed', reason: '含元话语' };
+    }
+    return { ok: true, content: normalized };
+}
+
+function validateRecallCandidate(text) {
+    const normalized = normalizeLlmText(text).replace(/\n+/g, ' ');
+    if (!normalized) return { ok: false, failureType: 'empty', reason: '空输出' };
+    if (isGreetingLikeText(normalized)) return { ok: false, failureType: 'junk', reason: '寒暄输出' };
+    if (normalized.length < 4) return { ok: false, failureType: 'validation_failed', reason: '查询过短' };
+    if (/以下是|查询如下|解释|步骤|结果[:：]/i.test(normalized)) {
+        return { ok: false, failureType: 'validation_failed', reason: '含解释性话术' };
+    }
+    return { ok: true, content: normalized };
+}
+
+function validateKeywordsCandidate(text) {
+    const normalized = normalizeLlmText(text).replace(/\n+/g, ' ');
+    if (!normalized) return { ok: false, failureType: 'empty', reason: '空输出' };
+    if (isGreetingLikeText(normalized)) return { ok: false, failureType: 'junk', reason: '寒暄输出' };
+    if (normalized.length < 2) return { ok: false, failureType: 'validation_failed', reason: '关键词过短' };
+    if (!/[\u4e00-\u9fa5A-Za-z0-9]/.test(normalized)) return { ok: false, failureType: 'validation_failed', reason: '缺少有效字符' };
+    return { ok: true, content: normalized };
+}
+
+function validateTaskLlmOutput(taskId, text) {
+    if (taskId === 'import') return validateImportCandidate(text);
+    if (taskId === 'keywords') return validateKeywordsCandidate(text);
+    if (taskId === 'disclosure') return validateDisclosureCandidate(text);
+    if (taskId === 'recall') return validateRecallCandidate(text);
+    const normalized = normalizeLlmText(text);
+    if (!normalized) return { ok: false, failureType: 'empty', reason: '空输出' };
+    return { ok: true, content: normalized };
 }
 
 async function callLlm(messages, options = {}) {
@@ -1246,14 +1667,103 @@ async function callLlm(messages, options = {}) {
     return data?.choices?.[0]?.message?.content || data?.content || '';
 }
 
-async function maybeProcessImportContent(message, settings = getSettings()) {
+async function executeLlmTask(taskId, variables = {}, options = {}, settings = getSettings()) {
     const llm = getCurrentLlmPreset(settings);
-    const rawContent = buildImportContent(message);
-    if (!llm.enabled) return rawContent;
+    const fallback = typeof options.fallback === 'function' ? options.fallback : () => '';
+    const rawFallback = normalizeLlmText(fallback());
+    const maxAttempts = llm.enabled ? 3 : 0;
+    let lastFailureType = '';
+    let lastError = null;
 
-    const messages = buildPromptMessages('importPrompt', { input: rawContent }, settings);
-    const result = await callLlm(messages, { maxTokens: llm.maxTokens });
-    return String(result || '').trim() || rawContent;
+    if (!llm.enabled) {
+        const fallbackValidation = validateTaskLlmOutput(taskId, rawFallback);
+        return {
+            ok: fallbackValidation.ok,
+            content: fallbackValidation.ok ? fallbackValidation.content : '',
+            source: 'fallback',
+            attempts: 0,
+            failureType: fallbackValidation.ok ? '' : fallbackValidation.failureType,
+            fallbackContent: rawFallback,
+        };
+    }
+
+    const messages = buildPromptMessages(`${taskId}Prompt`, variables, settings);
+    const maxTokens = getTaskMaxTokens(taskId, options, settings);
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+            const result = await callLlm(messages, { maxTokens });
+            const validation = validateTaskLlmOutput(taskId, result);
+            if (validation.ok) {
+                return {
+                    ok: true,
+                    content: validation.content,
+                    source: 'llm',
+                    attempts: attempt,
+                    failureType: '',
+                    fallbackContent: rawFallback,
+                };
+            }
+            lastFailureType = validation.failureType || 'validation_failed';
+            lastError = new Error(validation.reason || 'LLM 输出未通过校验');
+            if (!shouldRetryLlmFailure(lastFailureType) || attempt >= maxAttempts) {
+                break;
+            }
+        } catch (error) {
+            lastFailureType = classifyLlmError(error);
+            lastError = error;
+            if (!shouldRetryLlmFailure(lastFailureType) || attempt >= maxAttempts) {
+                break;
+            }
+        }
+        const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+
+    const fallbackValidation = validateTaskLlmOutput(taskId, rawFallback);
+    if (fallbackValidation.ok) {
+        return {
+            ok: true,
+            content: fallbackValidation.content,
+            source: 'fallback',
+            attempts: maxAttempts,
+            failureType: lastFailureType,
+            error: lastError,
+            fallbackContent: rawFallback,
+        };
+    }
+
+    return {
+        ok: false,
+        content: '',
+        source: 'failed',
+        attempts: maxAttempts,
+        failureType: fallbackValidation.failureType || lastFailureType || 'validation_failed',
+        error: lastError,
+        fallbackContent: rawFallback,
+    };
+}
+
+function buildFallbackRecallQuery(input) {
+    const normalized = normalizeImportSourceText(input).replace(/\n+/g, ' ').trim();
+    if (!normalized) return '';
+    const keywords = Array.from(new Set(normalized.match(/[\u4e00-\u9fa5A-Za-z0-9_]{2,20}/g) || [])).slice(0, 12);
+    return keywords.join(' ');
+}
+
+async function generateImportKeywords(message, settings = getSettings()) {
+    const rawContent = buildImportContent(message);
+    const execution = await executeLlmTask('keywords', { input: rawContent }, {
+        settings,
+        fallback: () => {
+            const cleaned = normalizeImportSourceText(message?.text || '');
+            return Array.from(new Set((cleaned.match(/[\u4e00-\u9fa5A-Za-z0-9_]{2,20}/g) || []))).slice(0, 8).join(' ');
+        },
+    }, settings);
+    if (!execution.ok || !execution.content.trim()) return [];
+    return Array.from(new Set(
+        execution.content.trim().split(/[\s,，、;；|/]+/).map(k => k.trim()).filter(k => k.length >= 2)
+    )).slice(0, 10);
 }
 
 function renderImportList() {
@@ -1263,21 +1773,15 @@ function renderImportList() {
 
     const settings = getSettings();
     const visibleMessages = getVisibleImportMessages(settings);
-    const allMessages = getChatMessagesForImport();
-    const messageMap = new Map(allMessages.map(message => [message.index, message]));
-    const selectedMessages = Array.from(importSelection)
-        .sort((left, right) => left - right)
-        .map(index => messageMap.get(index))
-        .filter(Boolean)
-        .filter(message => message.text.trim());
-
-    updateImportFilterModeUI();
+    const selectedMessages = collectSelectedImportMessages();
     updateImportSummaryCards({ visibleMessages, selectedMessages, settings });
 
     if (!visibleMessages.length) {
         importLastClickedVisibleIndex = null;
         container.innerHTML = '<div class="mb-hint">当前筛选条件下没有可导入楼层。</div>';
         summary.textContent = '0 条可导入';
+        const panelSummary = document.getElementById('mb-panel-import-summary-copy');
+        if (panelSummary) panelSummary.textContent = '当前无可导入楼层';
         return;
     }
 
@@ -1294,6 +1798,8 @@ function renderImportList() {
         all: '全部楼层',
     };
     summary.textContent = `${modeTextMap[filters.filterMode] || '当前视图'}：可见 ${visibleMessages.length} 条，已选 ${selectedMessages.length} 条，范围 ${rangeText}`;
+    const panelSummary = document.getElementById('mb-panel-import-summary-copy');
+    if (panelSummary) panelSummary.textContent = summary.textContent;
     container.innerHTML = visibleMessages.map((message) => {
         const checked = importSelection.has(message.index) ? 'checked' : '';
         const role = message.isUser ? '用户' : '助手';
@@ -1325,33 +1831,73 @@ function collectSelectedImportMessages() {
 async function runSelectedImport() {
     saveSettingsFromUI();
     const settings = getSettings();
-    const importSettings = getImportSettings(settings);
     const selectedMessages = collectSelectedImportMessages();
     if (!selectedMessages.length) {
         return { ok: false, message: '请先勾选要导入的楼层' };
     }
 
-    const parentUri = importSettings.parentUri?.trim();
+    const parentUri = buildChatBoundParentUri(settings);
     if (!parentUri) {
-        return { ok: false, message: '请先填写父 URI' };
+        return { ok: false, message: '当前无法解析导入目标 URI' };
+    }
+
+    const batchSize = Math.max(1, getImportSettings(settings).batchSize || 1);
+
+    // Split into batches
+    const batches = [];
+    for (let i = 0; i < selectedMessages.length; i += batchSize) {
+        batches.push(selectedMessages.slice(i, i + batchSize));
     }
 
     let successCount = 0;
     const failures = [];
-    for (const message of selectedMessages) {
-        const processedContent = await maybeProcessImportContent(message, settings);
+
+    for (const batch of batches) {
+        // Filter out meaningless messages; skip whole batch if all empty
+        const meaningful = batch.filter(m => isImportContentMeaningful(normalizeImportSourceText(m.text || '', settings)));
+        if (!meaningful.length) {
+            batch.forEach(m => failures.push(`#${m.index + 1}: 导入内容无有效信息，已跳过`));
+            continue;
+        }
+
+        // Merge content for this batch
+        const mergedContent = meaningful.map(m => {
+            const roleLabel = m.isUser ? '用户' : '助手';
+            return `【#${m.floor} ${roleLabel}】\n${normalizeImportSourceText(m.text || '', settings)}`;
+        }).join('\n\n---\n\n');
+
+        // Use first meaningful message as representative for title/priority/disclosure
+        const rep = meaningful[0];
+        const batchLabel = meaningful.length > 1
+            ? `#${meaningful[0].floor}-${meaningful[meaningful.length - 1].floor}`
+            : `#${rep.floor}`;
+
+        // Build a synthetic message object for LLM tasks
+        const syntheticMsg = { ...rep, text: mergedContent };
+
+        const [keywords, disclosure] = await Promise.all([
+            generateImportKeywords(syntheticMsg, settings),
+            generateDisclosure(syntheticMsg, settings),
+        ]);
+        setDisclosurePreview(disclosure);
+
         const args = {
             parent_uri: parentUri,
-            title: getImportTitle(message.index, settings),
-            content: processedContent,
-            priority: message.isUser ? 2 : 3,
-            disclosure: importSettings.disclosure?.trim() || '当需要回想这段聊天内容时',
+            title: getImportTitle(rep.index, settings),
+            content: mergedContent,
+            priority: rep.isUser ? 2 : 3,
+            disclosure,
         };
         try {
-            await createMemory(args);
-            successCount += 1;
+            const createResult = await createMemory(args);
+            const createdUriMatch = String(createResult || '').match(/'([^'\n]+:\/\/[^'\n]+)'/);
+            const createdUri = createdUriMatch?.[1] || '';
+            if (createdUri && keywords.length) {
+                await manageMemoryTriggers(createdUri, keywords);
+            }
+            successCount += meaningful.length;
         } catch (error) {
-            failures.push(`#${message.index + 1}: ${getErrorMessage(error)}`);
+            meaningful.forEach(m => failures.push(`${batchLabel}: ${getErrorMessage(error)}`));
         }
     }
 
@@ -1532,33 +2078,313 @@ function updateStatusUI(state) {
         errorText.textContent = lastErrorMessage || '';
         errorText.classList.toggle('mb-hidden', !lastErrorMessage);
     }
+
+    const panelState = document.getElementById('mb-panel-connection-state');
+    const panelError = document.getElementById('mb-panel-error-text');
+    const statusLine = document.getElementById('mb-panel-status-line');
+    if (panelState) panelState.textContent = text.textContent;
+    if (panelError) panelError.textContent = lastErrorMessage || '暂无错误';
+    if (statusLine) statusLine.textContent = `连接：${text.textContent} · 聊天：${currentChatBindingState.label || '未识别'}`;
 }
 
 function updateLastInjectPreview(content) {
     const el = document.getElementById('mb-last-inject');
-    if (!el) return;
-    if (content) {
-        el.textContent = content.slice(0, 300) + (content.length > 300 ? '...' : '');
-        el.classList.remove('empty');
-    } else {
-        el.textContent = '（尚未注入）';
-        el.classList.add('empty');
+    if (el) {
+        if (content) {
+            el.textContent = content.slice(0, 300) + (content.length > 300 ? '...' : '');
+            el.classList.remove('empty');
+        } else {
+            el.textContent = '（尚未注入）';
+            el.classList.add('empty');
+        }
+    }
+
+    const panelPreview = document.getElementById('mb-panel-last-inject');
+    const panelShort = document.getElementById('mb-panel-last-inject-short');
+    if (panelPreview) {
+        panelPreview.textContent = content || '（尚未注入）';
+        panelPreview.classList.toggle('empty', !content);
+    }
+    if (panelShort) {
+        panelShort.textContent = content ? `${content.slice(0, 60)}${content.length > 60 ? '...' : ''}` : '尚未注入';
+        panelShort.classList.toggle('empty', !content);
     }
 }
 
 function updateBootStatusUI(content) {
     const el = document.getElementById('mb-boot-status');
-    if (!el) return;
-    if (content) {
-        el.textContent = content;
-        el.classList.remove('empty');
-    } else {
-        el.textContent = '（尚未加载）';
-        el.classList.add('empty');
+    if (el) {
+        if (content) {
+            el.textContent = content;
+            el.classList.remove('empty');
+        } else {
+            el.textContent = '（尚未加载）';
+            el.classList.add('empty');
+        }
+    }
+
+    const panelBoot = document.getElementById('mb-panel-boot-state');
+    if (panelBoot) {
+        panelBoot.textContent = content || '尚未加载';
+        panelBoot.classList.toggle('empty', !content);
     }
 }
 
 // ─── 设置面板 ─────────────────────────────────────────────────────────────────
+
+function updatePanelChatBindingUI(settings = getSettings()) {
+    const state = currentChatBindingState;
+    const resolvedParentUri = buildChatBoundParentUri(settings);
+    const effectiveTargetLabel = getEffectiveImportTargetLabel(settings);
+    const chatLabel = document.getElementById('mb-panel-chat-label');
+    const parentUri = document.getElementById('mb-panel-parent-uri');
+    const parentUriSource = document.getElementById('mb-panel-parent-uri-source');
+    const workMode = document.getElementById('mb-panel-work-mode');
+    const importTarget = document.getElementById('mb-panel-import-target-uri');
+    const settingsUri = document.getElementById('mb-chat-bound-parent-uri');
+    if (chatLabel) chatLabel.textContent = `当前聊天：${state.label}`;
+    if (parentUri) parentUri.textContent = effectiveTargetLabel;
+    if (parentUriSource) parentUriSource.textContent = state.source === 'chat' ? '按当前聊天自动生成' : '未拿到 chatId，使用默认回退';
+    if (workMode) workMode.textContent = `当前模式：${getSettings().workMode}`;
+    if (importTarget) importTarget.textContent = effectiveTargetLabel;
+    if (settingsUri) settingsUri.textContent = resolvedParentUri;
+}
+
+function setPanelTab(tabId) {
+    const settings = getSettings();
+    currentPanelTab = tabId;
+    getUiSettings(settings).activeTab = tabId;
+    persistSettings(settings);
+    document.querySelectorAll('.mb-panel-tab').forEach((button) => {
+        button.classList.toggle('is-active', button.dataset.mbTab === tabId);
+    });
+    document.querySelectorAll('[data-mb-tab-panel]').forEach((panel) => {
+        panel.classList.toggle('is-active', panel.dataset.mbTabPanel === tabId);
+    });
+}
+
+function openPanel(targetTab = currentPanelTab) {
+    if (!panelRoot) return;
+    if (targetTab) {
+        currentPanelTab = targetTab;
+    }
+    panelRoot.classList.remove('mb-hidden');
+    setPanelTab(currentPanelTab);
+    refreshPanelState();
+}
+
+function closePanel() {
+    panelRoot?.classList.add('mb-hidden');
+}
+
+function openSettingsDrawer() {
+    const drawer = document.querySelector('#memory-bridge-settings')?.closest('.inline-drawer');
+    const toggle = drawer?.querySelector('.inline-drawer-toggle');
+    const content = drawer?.querySelector('.inline-drawer-content');
+    if (content && getComputedStyle(content).display === 'none') {
+        toggle?.click();
+    }
+    drawer?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function refreshPanelState() {
+    updatePanelChatBindingUI();
+    updateStatusUI(connectionState);
+    updateLastInjectPreview(lastInjectedContent);
+    updateBootStatusUI(lastBootStatusMessage);
+    setDisclosurePreview(lastGeneratedDisclosurePreview);
+    renderImportList();
+}
+
+function updateFabVisibility(settings = getSettings()) {
+    const enabled = !!getBridgeSettings(settings).enabled;
+    panelFab?.classList.toggle('mb-hidden', !enabled);
+    panelNavButton?.classList.toggle('mb-hidden', !enabled);
+}
+
+function clampFabRatio(value, fallback) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return fallback;
+    return Math.min(0.95, Math.max(0.05, num));
+}
+
+function applyFabPosition(settings = getSettings()) {
+    if (!panelFab) return;
+    const fabPosition = getUiSettings(settings).fabPosition || DEFAULT_SETTINGS.ui.fabPosition;
+    const x = clampFabRatio(fabPosition.x, DEFAULT_SETTINGS.ui.fabPosition.x);
+    const y = clampFabRatio(fabPosition.y, DEFAULT_SETTINGS.ui.fabPosition.y);
+    panelFab.style.left = `${Math.round(window.innerWidth * x)}px`;
+    panelFab.style.top = `${Math.round(window.innerHeight * y)}px`;
+}
+
+function saveFabPositionFromViewport(left, top) {
+    const settings = getSettings();
+    const nextX = clampFabRatio(left / Math.max(window.innerWidth, 1), DEFAULT_SETTINGS.ui.fabPosition.x);
+    const nextY = clampFabRatio(top / Math.max(window.innerHeight, 1), DEFAULT_SETTINGS.ui.fabPosition.y);
+    getUiSettings(settings).fabPosition = { x: nextX, y: nextY };
+    persistSettings(settings);
+    applyFabPosition(settings);
+}
+
+function handleFabPointerMove(event) {
+    if (!fabDragState || !panelFab) return;
+    const nextLeft = Math.min(
+        Math.max(event.clientX - fabDragState.offsetX, 28),
+        Math.max(28, window.innerWidth - 28),
+    );
+    const nextTop = Math.min(
+        Math.max(event.clientY - fabDragState.offsetY, 28),
+        Math.max(28, window.innerHeight - 28),
+    );
+    const distance = Math.hypot(event.clientX - fabDragState.startX, event.clientY - fabDragState.startY);
+    if (distance > 6) {
+        fabDragState.dragged = true;
+        panelFab.classList.add('is-dragging');
+    }
+    panelFab.style.left = `${Math.round(nextLeft)}px`;
+    panelFab.style.top = `${Math.round(nextTop)}px`;
+}
+
+function handleFabPointerUp() {
+    if (!fabDragState || !panelFab) return;
+    const dragged = fabDragState.dragged;
+    const left = parseFloat(panelFab.style.left || '0');
+    const top = parseFloat(panelFab.style.top || '0');
+    panelFab.releasePointerCapture?.(fabDragState.pointerId);
+    panelFab.removeEventListener('pointermove', handleFabPointerMove);
+    panelFab.removeEventListener('pointerup', handleFabPointerUp);
+    panelFab.removeEventListener('pointercancel', handleFabPointerUp);
+    panelFab.classList.remove('is-dragging');
+    fabDragState = null;
+    saveFabPositionFromViewport(left, top);
+    if (!dragged) {
+        openPanel();
+    }
+}
+
+function bindFloatingButtonDrag() {
+    if (!panelFab || panelFab.dataset.mbDragBound === 'true') return;
+    panelFab.dataset.mbDragBound = 'true';
+    panelFab.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return;
+        const rect = panelFab.getBoundingClientRect();
+        fabDragState = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            offsetX: event.clientX - rect.left,
+            offsetY: event.clientY - rect.top,
+            dragged: false,
+        };
+        panelFab.setPointerCapture?.(event.pointerId);
+        panelFab.addEventListener('pointermove', handleFabPointerMove);
+        panelFab.addEventListener('pointerup', handleFabPointerUp);
+        panelFab.addEventListener('pointercancel', handleFabPointerUp);
+        event.preventDefault();
+    });
+}
+
+function openMemoryBridgeWorkspace(targetTab = currentPanelTab) {
+    openPanel(targetTab);
+}
+
+function injectNavButton() {
+    if (panelNavButton) return;
+    const leftSendForm = document.querySelector('#leftSendForm');
+    if (!leftSendForm) return;
+    const button = document.createElement('div');
+    button.id = 'mb-workspace-trigger';
+    button.className = 'fa-solid fa-brain interactable';
+    button.tabIndex = 0;
+    button.title = 'Memory Bridge 工作台';
+    button.style.cssText = `
+        order: 11;
+        display: flex;
+        width: var(--bottomFormBlockSize);
+        height: var(--bottomFormBlockSize);
+        align-items: center;
+        justify-content: center;
+    `;
+    button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openMemoryBridgeWorkspace();
+    });
+    leftSendForm.appendChild(button);
+    panelNavButton = button;
+    updateFabVisibility();
+}
+
+function bindWorkspaceActions() {
+    panelFab?.addEventListener('click', (event) => {
+        if (fabDragState?.dragged) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+    });
+
+    panelRoot?.querySelectorAll('[data-mb-panel-close]').forEach((element) => {
+        element.addEventListener('click', closePanel);
+    });
+
+    panelRoot?.querySelectorAll('.mb-panel-tab').forEach((button) => {
+        button.addEventListener('click', () => setPanelTab(button.dataset.mbTab || 'overview'));
+    });
+
+    document.getElementById('mb-panel-refresh')?.addEventListener('click', refreshPanelState);
+    document.getElementById('mb-panel-open-settings')?.addEventListener('click', openSettingsDrawer);
+    document.getElementById('mb-panel-go-settings')?.addEventListener('click', openSettingsDrawer);
+    document.getElementById('mb-panel-test-recall')?.addEventListener('click', async () => {
+        const textarea = (window.parent || window).document.getElementById('send_textarea');
+        const query = textarea?.value?.trim() || '测试';
+        const { ok, result, message } = await runRecallPreview(query);
+        toastr[ok ? (result ? 'success' : 'warning') : 'warning'](message, 'Memory Bridge');
+        setPanelTab('recall');
+    });
+}
+
+function injectOptionsMenuEntry() {
+    if (document.getElementById('option_memory_bridge_panel')) return;
+    const optionsContent = $('#options .options-content');
+    const anchor = $('#option_toggle_logprobs');
+    const menuItem = $(`
+        <a id="option_memory_bridge_panel">
+          <i class="fa-lg fa-solid fa-brain"></i>
+          <span>Memory Bridge</span>
+        </a>
+    `).on('click', () => {
+        openPanel();
+        $('#options').hide();
+    });
+
+    if (anchor.length > 0) {
+        anchor.after(menuItem);
+    } else if (optionsContent.length > 0) {
+        optionsContent.append(menuItem);
+    }
+}
+
+async function mountStandalonePanel() {
+    if (panelRoot && panelFab) return;
+    const { renderExtensionTemplateAsync } = SillyTavern.getContext();
+    const panelHtml = await renderExtensionTemplateAsync('third-party/memory-bridge', 'panel');
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = panelHtml.trim();
+    panelRoot = wrapper.querySelector('#memory-bridge-panel-root');
+    panelContainer = wrapper.querySelector('.mb-panel-shell');
+    panelFab = wrapper.querySelector('#mb-floating-button');
+    if (panelRoot) document.body.appendChild(panelRoot);
+    if (panelFab) {
+        document.body.appendChild(panelFab);
+        bindFloatingButtonDrag();
+        applyFabPosition();
+    }
+    bindWorkspaceActions();
+    injectNavButton();
+    setPanelTab(getUiSettings().activeTab || currentPanelTab);
+    updateFabVisibility();
+    refreshPanelState();
+}
 
 function updateConnectionModeUI() {
     const mode = document.getElementById('mb-connection-mode')?.value ?? 'http';
@@ -1586,7 +2412,12 @@ function renderLlmModelOptions(models = [], selectedModel = '') {
     ].join('');
 }
 
-async function fetchOpenAiCompatibleModels(apiUrl, apiKey) {
+async function fetchOpenAiCompatibleModels(apiUrl, apiKey, settings = getSettings()) {
+    const preset = getCurrentLlmPreset(settings);
+    const source = String(preset?.source || '').trim();
+    if (source === 'tavern') {
+        throw new Error('当前预设使用 Tavern 主模型，无需填写 API URL');
+    }
     const baseUrl = String(apiUrl || '').trim().replace(/\/chat\/completions$/i, '').replace(/\/+$/, '');
     if (!baseUrl) {
         throw new Error('请先填写 API URL');
@@ -1609,12 +2440,15 @@ async function fetchOpenAiCompatibleModels(apiUrl, apiKey) {
 }
 
 async function testCurrentLlmPreset(settings = getSettings()) {
-    const preset = getCurrentLlmPreset(settings);
-    const messages = buildPromptMessages('recallPrompt', { input: '测试：阿洲，中村圆，地下停车场。' }, settings);
-    if (!messages.length) {
-        throw new Error('当前提示词为空');
+    const execution = await executeLlmTask('recall', { input: '测试：阿洲，中村圆，地下停车场。' }, {
+        settings,
+        maxTokens: 300,
+    }, settings);
+    if (!execution.ok || execution.source !== 'llm') {
+        const reason = !execution.ok ? (execution.failureType || 'unknown') : 'fallback (LLM 未实际响应)';
+        throw new Error(`当前 LLM 预设测试失败: ${reason}`);
     }
-    return await callLlm(messages, { maxTokens: Math.min(Number(preset.maxTokens) || 2000, 300) });
+    return execution.content;
 }
 
 function renderLlmPresetOptions() {
@@ -1633,6 +2467,8 @@ function syncCurrentLlmPresetFromUI(settings = getSettings()) {
     const preset = getCurrentLlmPreset(settings);
     if (!preset) return;
     const get = (id) => document.getElementById(id);
+    const templateMap = Object.fromEntries(DEFAULT_LLM_PROMPT_TEMPLATES.map(template => [template.id, template]));
+    const existingPromptMap = new Map(Array.isArray(preset.prompts) ? preset.prompts.map(prompt => [prompt?.id, prompt]) : []);
     preset.enabled = get('mb-llm-enabled')?.checked ?? false;
     preset.source = get('mb-llm-source')?.value ?? 'tavern';
     preset.tavernProfile = get('mb-llm-tavern-profile')?.value?.trim() ?? '';
@@ -1644,22 +2480,41 @@ function syncCurrentLlmPresetFromUI(settings = getSettings()) {
     preset.useMainApi = get('mb-llm-use-main-api')?.checked ?? true;
     preset.prompts = [
         {
+            ...(existingPromptMap.get('mainPrompt') || {}),
             id: 'mainPrompt',
             name: '主系统提示词',
             role: 'system',
             content: get('mb-llm-main-prompt')?.value ?? '',
         },
         {
+            ...(existingPromptMap.get('importPrompt') || {}),
             id: 'importPrompt',
             name: '历史导入处理指令',
             role: 'user',
             content: get('mb-llm-import-prompt')?.value ?? '',
+            systemPrompt: existingPromptMap.get('importPrompt')?.systemPrompt ?? templateMap.import?.systemPrompt ?? '',
+            validator: existingPromptMap.get('importPrompt')?.validator ?? templateMap.import?.validator ?? 'keywords',
+            maxTokens: existingPromptMap.get('importPrompt')?.maxTokens ?? templateMap.import?.maxTokens ?? 200,
         },
         {
+            ...(existingPromptMap.get('disclosurePrompt') || {}),
+            id: 'disclosurePrompt',
+            name: '导入 disclosure 生成指令',
+            role: 'user',
+            content: get('mb-llm-disclosure-prompt')?.value ?? '',
+            systemPrompt: existingPromptMap.get('disclosurePrompt')?.systemPrompt ?? templateMap.disclosure?.systemPrompt ?? '',
+            validator: existingPromptMap.get('disclosurePrompt')?.validator ?? templateMap.disclosure?.validator ?? 'disclosure',
+            maxTokens: existingPromptMap.get('disclosurePrompt')?.maxTokens ?? templateMap.disclosure?.maxTokens ?? 200,
+        },
+        {
+            ...(existingPromptMap.get('recallPrompt') || {}),
             id: 'recallPrompt',
             name: '召回查询处理指令',
             role: 'user',
             content: get('mb-llm-recall-prompt')?.value ?? '',
+            systemPrompt: existingPromptMap.get('recallPrompt')?.systemPrompt ?? templateMap.recall?.systemPrompt ?? '',
+            validator: existingPromptMap.get('recallPrompt')?.validator ?? templateMap.recall?.validator ?? 'recall',
+            maxTokens: existingPromptMap.get('recallPrompt')?.maxTokens ?? templateMap.recall?.maxTokens ?? 300,
         },
     ];
 }
@@ -1684,40 +2539,35 @@ function updateLlmSourceUI() {
 
 function loadSettingsToUI() {
     const s = getSettings();
-    const connection = getConnectionSettings(s);
     const bridge = getBridgeSettings(s);
+    const connection = getConnectionSettings(s);
     const toolExposure = getToolExposureSettings(s);
+    const llm = getCurrentLlmPreset(s);
     const set = (id, val) => {
         const el = document.getElementById(id);
         if (!el) return;
         el.type === 'checkbox' ? (el.checked = !!val) : (el.value = val ?? '');
     };
-    set('mb-work-mode', s.workMode);
     set('mb-enabled', bridge.enabled);
-    set('mb-tool-exposure-enabled', toolExposure.enabled);
-    set('mb-tool-stealth', toolExposure.stealth !== false);
+    const imp = getImportSettings(s);
+    set('mb-import-filter-mode', imp.filterMode);
+    set('mb-import-limit', imp.limit);
+    set('mb-import-range-start', imp.rangeStart);
+    set('mb-import-range-end', imp.rangeEnd);
+    set('mb-import-keyword', imp.keyword);
+    set('mb-import-role-filter', imp.roleFilter);
+    set('mb-import-nonempty', imp.nonEmptyOnly);
+    set('mb-import-batch-size', imp.batchSize ?? 1);
+    set('mb-import-strip-tags', (imp.stripTagPatterns || []).join('\n'));
+    set('mb-work-mode', s.workMode);
     set('mb-connection-mode', connection.mode);
     set('mb-server-url', connection.serverUrl);
     set('mb-token', connection.token);
-    set('mb-mcp-config-json', connection.mcpConfigJson);
     set('mb-selected-server-name', connection.selectedServerName);
-    set('mb-recall-limit', bridge.recallLimit);
-    set('mb-domain', bridge.domain);
-    set('mb-inject-tag', bridge.injectTag);
-    set('mb-boot-enabled', bridge.bootEnabled);
-    set('mb-boot-uri', bridge.bootUri);
-    set('mb-test-snippet', bridge.testSnippet);
-    const importSettings = getImportSettings(s);
-    set('mb-import-filter-mode', importSettings.filterMode);
-    set('mb-import-limit', importSettings.limit);
-    set('mb-import-range-start', importSettings.rangeStart);
-    set('mb-import-range-end', importSettings.rangeEnd);
-    set('mb-import-role-filter', importSettings.roleFilter);
-    set('mb-import-keyword', importSettings.keyword);
-    set('mb-import-non-empty-only', importSettings.nonEmptyOnly !== false);
-    set('mb-import-bulk-range', '');
+    set('mb-mcp-config-json', connection.mcpConfigJson);
+    set('mb-tool-exposure-enabled', toolExposure.enabled);
+    set('mb-tool-stealth', toolExposure.stealth);
     renderLlmPresetOptions();
-    const llm = getCurrentLlmPreset(s);
     set('mb-llm-enabled', llm.enabled);
     set('mb-llm-source', llm.source);
     set('mb-llm-tavern-profile', llm.tavernProfile);
@@ -1727,18 +2577,22 @@ function loadSettingsToUI() {
     set('mb-llm-temperature', llm.temperature);
     set('mb-llm-max-tokens', llm.maxTokens);
     set('mb-llm-use-main-api', llm.useMainApi);
-    renderLlmModelOptions([], llm.model || '');
-    set('mb-llm-main-prompt', getPromptById('mainPrompt', s)?.content || '');
-    set('mb-llm-import-prompt', getPromptById('importPrompt', s)?.content || '');
-    set('mb-llm-recall-prompt', getPromptById('recallPrompt', s)?.content || '');
-    set('mb-debug', s.debug);
-    updateConnectionModeUI();
+    set('mb-llm-main-prompt', getPromptById('mainPrompt', s)?.content ?? '');
+    set('mb-llm-import-prompt', getPromptById('importPrompt', s)?.content ?? '');
+    set('mb-llm-disclosure-prompt', getPromptById('disclosurePrompt', s)?.content ?? '');
+    set('mb-llm-recall-prompt', getPromptById('recallPrompt', s)?.content ?? '');
     updateImportFilterModeUI();
     updateWorkModeUI();
+    updateConnectionModeUI();
     updateLlmSourceUI();
+    updateFabVisibility(s);
+    applyFabPosition(s);
+    refreshCurrentChatBinding();
+    updatePanelChatBindingUI(s);
     updateStatusUI(connectionState);
     updateLastInjectPreview(lastInjectedContent);
     updateBootStatusUI(lastBootStatusMessage);
+    setDisclosurePreview(lastGeneratedDisclosurePreview);
     renderImportList();
 }
 
@@ -1751,37 +2605,49 @@ function persistSettings(settings) {
 function saveSettingsFromUI() {
     const s = getSettings();
     const get = (id) => document.getElementById(id);
-    s.workMode = get('mb-work-mode')?.value ?? 'bridge';
-    s.connection.mode = get('mb-connection-mode')?.value ?? 'http';
-    s.connection.serverUrl = get('mb-server-url')?.value?.trim() ?? '';
-    s.connection.token = get('mb-token')?.value ?? '';
-    s.connection.mcpConfigJson = get('mb-mcp-config-json')?.value ?? DEFAULT_MCP_CONFIG_JSON;
-    s.connection.selectedServerName = get('mb-selected-server-name')?.value?.trim() ?? '';
     s.bridge.enabled = get('mb-enabled')?.checked ?? false;
-    s.bridge.recallLimit = parseInt(get('mb-recall-limit')?.value) || 5;
-    s.bridge.domain = get('mb-domain')?.value?.trim() ?? '';
-    s.bridge.injectTag = get('mb-inject-tag')?.value ?? '[记忆参考]';
-    s.bridge.bootEnabled = get('mb-boot-enabled')?.checked ?? false;
-    s.bridge.bootUri = get('mb-boot-uri')?.value?.trim() ?? 'system://boot';
-    s.import.parentUri = get('mb-import-parent-uri')?.value?.trim() ?? 'core://';
-    s.import.titlePrefix = get('mb-import-title-prefix')?.value?.trim() ?? 'chat';
-    s.import.disclosure = get('mb-import-disclosure')?.value?.trim() ?? '当需要回想这段聊天内容时';
-    s.import.filterMode = get('mb-import-filter-mode')?.value ?? 'recent';
-    s.import.limit = parseInt(get('mb-import-limit')?.value) || 20;
-    s.import.rangeStart = get('mb-import-range-start')?.value?.trim() ?? '';
-    s.import.rangeEnd = get('mb-import-range-end')?.value?.trim() ?? '';
-    s.import.roleFilter = get('mb-import-role-filter')?.value ?? 'all';
-    s.import.keyword = get('mb-import-keyword')?.value ?? '';
-    s.import.nonEmptyOnly = get('mb-import-non-empty-only')?.checked ?? true;
-    s.llm.selectedPresetId = get('mb-llm-preset')?.value ?? s.llm.selectedPresetId ?? 'default';
+    s.workMode = get('mb-work-mode')?.value ?? s.workMode;
+
+    const connection = getConnectionSettings(s);
+    connection.mode = get('mb-connection-mode')?.value ?? connection.mode;
+    connection.serverUrl = get('mb-server-url')?.value?.trim() ?? connection.serverUrl;
+    connection.token = get('mb-token')?.value ?? connection.token;
+    connection.selectedServerName = get('mb-selected-server-name')?.value?.trim() ?? connection.selectedServerName;
+    connection.mcpConfigJson = get('mb-mcp-config-json')?.value ?? connection.mcpConfigJson;
+
+    const toolExposure = getToolExposureSettings(s);
+    toolExposure.enabled = get('mb-tool-exposure-enabled')?.checked ?? toolExposure.enabled;
+    toolExposure.stealth = get('mb-tool-stealth')?.checked ?? toolExposure.stealth;
+
+    const selectedTools = {};
+    document.querySelectorAll('.mb-tool-checkbox').forEach((cb) => {
+        const name = cb.dataset.toolName;
+        if (name) selectedTools[name] = !!cb.checked;
+    });
+    toolExposure.selectedTools = selectedTools;
+
+    const imp = getImportSettings(s);
+    if (get('mb-import-filter-mode')) imp.filterMode = get('mb-import-filter-mode').value;
+    if (get('mb-import-limit')) imp.limit = Math.max(1, parseInt(get('mb-import-limit').value, 10) || 20);
+    if (get('mb-import-range-start')) imp.rangeStart = get('mb-import-range-start').value;
+    if (get('mb-import-range-end')) imp.rangeEnd = get('mb-import-range-end').value;
+    if (get('mb-import-keyword')) imp.keyword = get('mb-import-keyword').value;
+    if (get('mb-import-role-filter')) imp.roleFilter = get('mb-import-role-filter').value;
+    if (get('mb-import-nonempty')) imp.nonEmptyOnly = get('mb-import-nonempty').checked;
+    const batchSizeEl = get('mb-import-batch-size');
+    if (batchSizeEl) imp.batchSize = Math.max(1, parseInt(batchSizeEl.value, 10) || 1);
+    const stripTagsEl = get('mb-import-strip-tags');
+    if (stripTagsEl) {
+        imp.stripTagPatterns = stripTagsEl.value.split(/[\n,]+/).map(t => t.trim()).filter(t => t.length > 0);
+    }
+
     syncCurrentLlmPresetFromUI(s);
-    s.toolExposure.enabled = get('mb-tool-exposure-enabled')?.checked ?? false;
-    s.toolExposure.stealth = get('mb-tool-stealth')?.checked ?? true;
-    s.toolExposure.selectedTools = Object.fromEntries(
-        Array.from(document.querySelectorAll('.mb-tool-checkbox')).map((el) => [el.dataset.toolName, el.checked]),
-    );
-    s.debug = get('mb-debug')?.checked ?? false;
     persistSettings(s);
+    updateImportFilterModeUI();
+    updateWorkModeUI();
+    updateConnectionModeUI();
+    updateLlmSourceUI();
+    updateFabVisibility(s);
 }
 
 async function runRecallPreview(query) {
@@ -1813,251 +2679,92 @@ function previewInjectedSnippet(snippet) {
 }
 
 function bindSettingsEvents() {
-    document.querySelectorAll('#memory-bridge-settings input, #memory-bridge-settings select, #memory-bridge-settings textarea')
+    document.querySelectorAll('#memory-bridge-settings input')
         .forEach(el => el.addEventListener('change', saveSettingsFromUI));
 
-    document.getElementById('mb-work-mode')?.addEventListener('change', () => {
-        saveSettingsFromUI();
-        updateWorkModeUI();
-        unregisterAllFunctionTools();
-        resetMcpClient();
-        setConnectionState('disconnected');
+    const configIds = [
+        'mb-work-mode',
+        'mb-connection-mode',
+        'mb-server-url',
+        'mb-token',
+        'mb-selected-server-name',
+        'mb-mcp-config-json',
+        'mb-tool-exposure-enabled',
+        'mb-tool-stealth',
+        'mb-llm-preset',
+        'mb-llm-enabled',
+        'mb-llm-source',
+        'mb-llm-tavern-profile',
+        'mb-llm-api-url',
+        'mb-llm-api-key',
+        'mb-llm-model',
+        'mb-llm-temperature',
+        'mb-llm-max-tokens',
+        'mb-llm-use-main-api',
+        'mb-llm-main-prompt',
+        'mb-llm-import-prompt',
+        'mb-llm-disclosure-prompt',
+        'mb-llm-recall-prompt',
+        'mb-import-filter-mode',
+        'mb-import-limit',
+        'mb-import-range-start',
+        'mb-import-range-end',
+        'mb-import-keyword',
+        'mb-import-role-filter',
+        'mb-import-nonempty',
+        'mb-import-batch-size',
+        'mb-import-strip-tags',
+    ];
+    configIds.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const eventName = el.tagName === 'TEXTAREA' || el.type === 'text' || el.type === 'password' || el.type === 'number' ? 'input' : 'change';
+        el.addEventListener(eventName, saveSettingsFromUI);
+        if (eventName !== 'change') el.addEventListener('change', saveSettingsFromUI);
     });
 
-    document.getElementById('mb-connection-mode')?.addEventListener('change', () => {
-        saveSettingsFromUI();
-        updateConnectionModeUI();
-        unregisterAllFunctionTools();
-        resetMcpClient();
-        setConnectionState('disconnected');
+    document.getElementById('mb-llm-preset')?.addEventListener('change', () => {
+        const s = getSettings();
+        const nextId = document.getElementById('mb-llm-preset')?.value;
+        if (nextId) getLlmState(s).selectedPresetId = nextId;
+        persistSettings(s);
+        loadSettingsToUI();
     });
 
-    document.getElementById('mb-llm-source')?.addEventListener('change', () => {
-        saveSettingsFromUI();
-        updateLlmSourceUI();
-    });
-
-    document.getElementById('mb-import-filter-mode')?.addEventListener('change', () => {
-        saveSettingsFromUI();
-        updateImportFilterModeUI();
-        renderImportList();
-    });
-
-    document.getElementById('mb-import-range-end')?.addEventListener('change', () => {
-        const start = normalizeImportRangeValue(document.getElementById('mb-import-range-start')?.value);
-        const end = normalizeImportRangeValue(document.getElementById('mb-import-range-end')?.value);
-        if (start != null && end != null) {
-            setImportSelectionByRange(start <= end ? { start, end } : { start: end, end: start });
-        } else {
-            saveSettingsFromUI();
-        }
-        updateImportFilterModeUI();
-        renderImportList();
-    });
-
-    document.getElementById('mb-import-range-start')?.addEventListener('change', () => {
-        const endInput = document.getElementById('mb-import-range-end');
-        const start = normalizeImportRangeValue(document.getElementById('mb-import-range-start')?.value);
-        const end = normalizeImportRangeValue(endInput?.value);
-        if (start != null && end == null && endInput) {
-            endInput.value = String(start);
-        }
-    });
-
-    ['mb-import-limit', 'mb-import-role-filter', 'mb-import-keyword', 'mb-import-non-empty-only', 'mb-import-parent-uri', 'mb-import-title-prefix']
-        .forEach((id) => {
-            document.getElementById(id)?.addEventListener('change', () => {
-                saveSettingsFromUI();
-                renderImportList();
-            });
-        });
-
-    document.getElementById('mb-import-keyword')?.addEventListener('input', () => {
-        saveSettingsFromUI();
-        renderImportList();
-    });
-
-    document.getElementById('mb-btn-fetch-models')?.addEventListener('click', async () => {
-        saveSettingsFromUI();
-        const preset = getCurrentLlmPreset();
-        try {
-            const models = await fetchOpenAiCompatibleModels(preset.apiUrl, preset.apiKey);
-            renderLlmModelOptions(models, preset.model || '');
-            toastr.success(`已获取 ${models.length} 个模型`, 'Memory Bridge');
-        } catch (error) {
-            toastr.error(getErrorMessage(error), 'Memory Bridge');
-        }
-    });
-
-    document.getElementById('mb-llm-model-list')?.addEventListener('change', (event) => {
-        const value = event.target?.value ?? '';
+    document.getElementById('mb-llm-model-list')?.addEventListener('change', () => {
+        const selected = document.getElementById('mb-llm-model-list')?.value;
         const input = document.getElementById('mb-llm-model');
-        if (input && value) {
-            input.value = value;
+        if (selected && input) {
+            input.value = selected;
             saveSettingsFromUI();
+        }
+    });
+
+    document.getElementById('mb-btn-fetch-llm-models')?.addEventListener('click', async () => {
+        saveSettingsFromUI();
+        const settings = getSettings();
+        const preset = getCurrentLlmPreset(settings);
+        toastr.info('正在拉取模型列表...', 'Memory Bridge');
+        try {
+            const models = await fetchOpenAiCompatibleModels(preset.apiUrl, preset.apiKey, settings);
+            renderLlmModelOptions(models, preset.model);
+            toastr.success(`已拉取 ${models.length} 个模型`, 'Memory Bridge');
+        } catch (error) {
+            toastr.error(`拉取失败: ${getErrorMessage(error)}`, 'Memory Bridge');
         }
     });
 
     document.getElementById('mb-btn-test-llm')?.addEventListener('click', async () => {
         saveSettingsFromUI();
+        const settings = getSettings();
+        toastr.info('正在测试当前 LLM 预设...', 'Memory Bridge');
         try {
-            const result = await testCurrentLlmPreset();
-            updateLastInjectPreview(String(result || '').trim() || '（空响应）');
-            toastr.success('LLM 响应测试成功', 'Memory Bridge');
+            const result = await testCurrentLlmPreset(settings);
+            const preview = String(result || '').trim().slice(0, 200) || '（模型已响应，但返回空内容）';
+            toastr.success(`连通性测试成功：${preview}`, 'Memory Bridge');
         } catch (error) {
-            toastr.error(getErrorMessage(error), 'Memory Bridge');
+            toastr.error(`测试失败: ${getErrorMessage(error)}`, 'Memory Bridge');
         }
-    });
-
-    document.getElementById('mb-llm-preset')?.addEventListener('change', () => {
-        saveSettingsFromUI();
-        loadSettingsToUI();
-    });
-
-    document.getElementById('mb-btn-add-llm-preset')?.addEventListener('click', () => {
-        const settings = getSettings();
-        syncCurrentLlmPresetFromUI(settings);
-        const presets = getLlmPresets(settings);
-        const preset = createDefaultLlmPreset(`预设 ${presets.length + 1}`);
-        presets.push(preset);
-        settings.llm.selectedPresetId = preset.id;
-        persistSettings(settings);
-        loadSettingsToUI();
-        toastr.success('已新建 LLM 预设', 'Memory Bridge');
-    });
-
-    document.getElementById('mb-btn-copy-llm-preset')?.addEventListener('click', () => {
-        const settings = getSettings();
-        syncCurrentLlmPresetFromUI(settings);
-        const current = getCurrentLlmPreset(settings);
-        const copy = {
-            ...JSON.parse(JSON.stringify(current)),
-            id: `llm-preset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            name: `${current.name || '预设'} (副本)`,
-        };
-        settings.llm.presets.push(copy);
-        settings.llm.selectedPresetId = copy.id;
-        persistSettings(settings);
-        loadSettingsToUI();
-        toastr.success('已复制 LLM 预设', 'Memory Bridge');
-    });
-
-    document.getElementById('mb-btn-delete-llm-preset')?.addEventListener('click', () => {
-        const settings = getSettings();
-        syncCurrentLlmPresetFromUI(settings);
-        const presets = getLlmPresets(settings);
-        if (presets.length <= 1) {
-            toastr.warning('至少保留一个 LLM 预设', 'Memory Bridge');
-            return;
-        }
-        settings.llm.presets = presets.filter(preset => preset.id !== settings.llm.selectedPresetId);
-        settings.llm.selectedPresetId = settings.llm.presets[0]?.id || 'default';
-        persistSettings(settings);
-        loadSettingsToUI();
-        toastr.success('已删除当前 LLM 预设', 'Memory Bridge');
-    });
-
-    document.getElementById('mb-btn-connect')?.addEventListener('click', async () => {
-        saveSettingsFromUI();
-        resetMcpClient();
-        const ok = await connect();
-        if (ok) {
-            try {
-                await registerMcpToolsToSillyTavern();
-            } catch (error) {
-                logError('注册函数工具失败:', error);
-            }
-        }
-        toastr[ok ? 'success' : 'error'](
-            ok ? 'MCP 服务连接成功' : (lastErrorMessage || '连接失败，请检查当前连接配置'),
-            'Memory Bridge',
-        );
-    });
-
-    document.getElementById('mb-btn-refresh-tools')?.addEventListener('click', async () => {
-        saveSettingsFromUI();
-        try {
-            await registerMcpToolsToSillyTavern();
-            toastr.success(`已刷新工具列表，当前注册 ${registeredFunctionTools.length} 个工具`, 'Memory Bridge');
-        } catch (error) {
-            logError('刷新工具列表失败:', error);
-            toastr.error(getErrorMessage(error), 'Memory Bridge');
-        }
-    });
-
-    document.getElementById('mb-btn-select-all-tools')?.addEventListener('click', () => {
-        document.querySelectorAll('.mb-tool-checkbox').forEach((el) => {
-            el.checked = true;
-        });
-        saveSettingsFromUI();
-    });
-
-    document.getElementById('mb-btn-clear-all-tools')?.addEventListener('click', () => {
-        document.querySelectorAll('.mb-tool-checkbox').forEach((el) => {
-            el.checked = false;
-        });
-        saveSettingsFromUI();
-    });
-
-    document.getElementById('mb-btn-test-recall')?.addEventListener('click', async () => {
-        const textarea = (window.parent || window).document.getElementById('send_textarea');
-        const query = textarea?.value?.trim() || '测试';
-        toastr.info('正在召回...', 'Memory Bridge');
-        const { ok, result, message } = await runRecallPreview(query);
-        toastr[ok ? (result ? 'success' : 'warning') : 'warning'](message, 'Memory Bridge');
-    });
-
-    document.getElementById('mb-btn-test-snippet')?.addEventListener('click', async () => {
-        saveSettingsFromUI();
-        const query = document.getElementById('mb-test-snippet')?.value ?? '';
-        toastr.info('正在测试文本片段召回...', 'Memory Bridge');
-        const { ok, result, message } = await runRecallPreview(query);
-        toastr[ok ? (result ? 'success' : 'warning') : 'warning'](message, 'Memory Bridge');
-    });
-
-    document.getElementById('mb-btn-preview-snippet')?.addEventListener('click', () => {
-        saveSettingsFromUI();
-        const query = document.getElementById('mb-test-snippet')?.value ?? '';
-        const { ok, message } = previewInjectedSnippet(query);
-        toastr[ok ? 'success' : 'warning'](message, 'Memory Bridge');
-    });
-
-    document.getElementById('mb-btn-clear-session')?.addEventListener('click', () => {
-        resetMcpClient();
-        resetBridgeRuntimeState();
-        setLastBootStatus('（会话已清除，等待重新加载）');
-        setConnectionState('disconnected');
-        toastr.info('会话已清除', 'Memory Bridge');
-    });
-
-    document.getElementById('mb-btn-refresh-import-list')?.addEventListener('click', () => {
-        saveSettingsFromUI();
-        renderImportList();
-        toastr.info('已刷新楼层列表', 'Memory Bridge');
-    });
-
-    document.getElementById('mb-btn-select-all-import')?.addEventListener('click', () => {
-        const visibleMessages = getVisibleImportMessages();
-        applySelectionToVisibleMessages(visibleMessages, () => true);
-        renderImportList();
-    });
-
-    document.getElementById('mb-btn-clear-import')?.addEventListener('click', () => {
-        importSelection.clear();
-        importLastClickedVisibleIndex = null;
-        renderImportList();
-    });
-
-    document.getElementById('mb-btn-invert-import')?.addEventListener('click', () => {
-        const visibleMessages = getVisibleImportMessages();
-        visibleMessages.forEach((message) => {
-            if (importSelection.has(message.index)) {
-                importSelection.delete(message.index);
-            } else {
-                importSelection.add(message.index);
-            }
-        });
-        renderImportList();
     });
 
     document.getElementById('mb-btn-apply-import-range')?.addEventListener('click', () => {
@@ -2114,26 +2821,45 @@ function bindSettingsEvents() {
         renderImportList();
     });
 
-
     document.getElementById('mb-btn-import-selected')?.addEventListener('click', async () => {
         toastr.info('正在导入选中楼层...', 'Memory Bridge');
         const { ok, message } = await runSelectedImport();
         toastr[ok ? 'success' : 'warning'](message, 'Memory Bridge');
+    });
+
+    document.getElementById('mb-tool-list')?.addEventListener('change', (event) => {
+        if (event.target?.classList?.contains('mb-tool-checkbox')) {
+            saveSettingsFromUI();
+        }
+    });
+
+    document.getElementById('mb-btn-refresh-tools')?.addEventListener('click', async () => {
+        toastr.info('正在刷新 MCP 工具列表...', 'Memory Bridge');
+        try {
+            await registerMcpToolsToSillyTavern();
+            toastr.success('工具列表刷新成功', 'Memory Bridge');
+        } catch (error) {
+            toastr.error(`刷新失败: ${getErrorMessage(error)}`, 'Memory Bridge');
+        }
     });
 }
 
 // ─── 初始化 ───────────────────────────────────────────────────────────────────
 
 jQuery(async () => {
-    // 初始化设置
     getSettings();
+    refreshCurrentChatBinding();
 
-    // 渲染设置面板（路径必须是 third-party/<目录名>）
     const { renderExtensionTemplateAsync, eventSource, event_types } = SillyTavern.getContext();
     const settingsHtml = await renderExtensionTemplateAsync('third-party/memory-bridge', 'settings');
     $('#extensions_settings2').append(settingsHtml);
 
-    // 加载设置到 UI 并绑定事件
+    try {
+        await mountStandalonePanel();
+    } catch (error) {
+        logError('独立面板挂载失败，已降级为仅保留设置抽屉:', error);
+    }
+
     loadSettingsToUI();
     bindSettingsEvents();
 
@@ -2143,20 +2869,29 @@ jQuery(async () => {
         logError('初始化注册函数工具失败:', error);
     }
 
-    // 安装发送意图捕获钩子
     installSendIntentHooks();
-
-    // 注册生成拦截
     eventSource.on(event_types.GENERATION_AFTER_COMMANDS, onGenerationAfterCommands);
 
-    // 切换聊天时加载 Boot Memory
-    eventSource.on(event_types.CHAT_CHANGED, async () => {
+    window.addEventListener('resize', () => {
+        applyFabPosition();
+    });
+
+    eventSource.on(event_types.CHAT_CHANGED, async (chatId) => {
+        refreshCurrentChatBinding(chatId);
         resetBridgeRuntimeState();
         importSelection.clear();
         renderImportList();
+        updatePanelChatBindingUI();
+        setDisclosurePreview('');
         setLastBootStatus('正在加载 Boot Memory...');
         await loadBootMemory();
+        refreshPanelState();
     });
+
+    if (SillyTavern.getContext()?.chatId) {
+        refreshCurrentChatBinding(SillyTavern.getContext().chatId);
+        updatePanelChatBindingUI();
+    }
 
     log('Memory Bridge 已加载');
 });

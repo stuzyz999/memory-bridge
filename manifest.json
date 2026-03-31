@@ -8,5 +8,6 @@
   "css": "style.css",
   "author": "memory-bridge",
   "homePage": "",
+  "loading_order": 150,
   "tags": ["memory", "mcp", "context"]
 }
