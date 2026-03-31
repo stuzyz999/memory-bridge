@@ -1,0 +1,10 @@
+.ace-tool/
+references/
+memory-db/
+backend/
+.debug.md
+.claude/
+.trellis/
+.kiro/
+
+
